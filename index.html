@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-08-v21" />
+<meta name="app-version" content="2026-11-09-v22" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -632,7 +632,7 @@
   }
 
   // ---- version self-check (anti-stale) ----
-  var PAGE_VERSION = "2026-11-08-v21";
+  var PAGE_VERSION = "2026-11-09-v22";
   window.ScalpPageVersion = PAGE_VERSION;
   setTimeout(function(){
     try {
@@ -2076,6 +2076,12 @@
 
   /* ===== Robot tab ===== */
   var robotOn = false, robotTimer = null, robotLogArr = [];
+  var ROBOT_ON_KEY = "scalping-robot-on";
+  function robotPersistOn(){
+    try { localStorage.setItem(ROBOT_ON_KEY, robotOn ? "1" : "0"); } catch (e) {}
+    if (window.AndroidBridge && AndroidBridge.robotState){ try { AndroidBridge.robotState(robotOn); } catch (e) {} }
+  }
+  function robotWantedOn(){ try { return localStorage.getItem(ROBOT_ON_KEY) === "1"; } catch (e) { return false; } }
   function gateMode(){ return window.ClaudeGateMode ? window.ClaudeGateMode() : "allow"; }
   function gateBlocked(){ return gateMode() === "block"; }
   function gatePasses(sig){
@@ -2238,6 +2244,8 @@
         '<div class="log-actions" data-entry="r' + robotEntrySeq + '"><button type="button" class="chip" data-robot-result="win">نفّذتها — ربح</button><button type="button" class="chip" data-robot-result="loss">نفّذتها — خسارة</button><button type="button" class="chip" data-robot-result="skip">تجاهلتها</button></div>');
       if (window.ScalpNotify) window.ScalpNotify("🤖 إشارة روبوت — " + dirTxt + " " + s.disp,
         "دخول " + lastClose.toFixed(s.dec) + " · وقف " + sl.toFixed(s.dec) + " · هدف " + tp.toFixed(s.dec) + " · لوت " + lot.toFixed(2), r.key);
+      if (window.AndroidBridge && AndroidBridge.signal){ try { AndroidBridge.signal("🤖 إشارة روبوت — " + dirTxt + " " + s.disp,
+        "دخول " + lastClose.toFixed(s.dec) + " · وقف " + sl.toFixed(s.dec) + " · هدف " + tp.toFixed(s.dec) + " · لوت " + lot.toFixed(2)); } catch (e) {} }
     });
     if (firedNow && typeof renderRobotControl === "function") renderRobotControl();
     if (manual){
@@ -2252,23 +2260,30 @@
     }
   }
   var robotToggle = document.getElementById("robotToggle");
-  if (robotToggle) robotToggle.addEventListener("click", function(){
-    robotOn = !robotOn;
+  function robotSetOn(on){
+    robotOn = !!on;
     var box = document.getElementById("robotStatus");
     var txt = document.getElementById("robotStatusTxt");
     if (robotOn){
-      box.classList.add("on"); txt.textContent = "الروبوت يشتغل";
-      robotToggle.textContent = "⏸ أوقف الروبوت";
+      if (box) box.classList.add("on"); if (txt) txt.textContent = "الروبوت يشتغل";
+      if (robotToggle) robotToggle.textContent = "⏸ أوقف الروبوت";
       robotScan(false);
+      if (robotTimer){ clearInterval(robotTimer); }
       robotTimer = setInterval(function(){ robotScan(false); }, 5000);
       if (gateBlocked()){ gateShowBlocked(); banner("<strong>الروبوت متوقف مؤقتاً — قرار Muse</strong>"); }
       else { banner("<strong>🤖 الروبوت اشتغل</strong>"); }
     } else {
-      box.classList.remove("on"); txt.textContent = "الروبوت متوقف";
-      robotToggle.textContent = "▶ شغّل الروبوت";
+      if (box) box.classList.remove("on"); if (txt) txt.textContent = "الروبوت متوقف";
+      if (robotToggle) robotToggle.textContent = "▶ شغّل الروبوت";
       if (robotTimer){ clearInterval(robotTimer); robotTimer = null; }
     }
-  });
+    robotPersistOn();
+  }
+  if (robotToggle) robotToggle.addEventListener("click", function(){ robotSetOn(!robotOn); });
+  window.ScalpRobotSet = robotSetOn;
+  window.ScalpRobotScan = function(){ if (robotOn) robotScan(false); };
+  window.ScalpRobotOn = function(){ return robotOn; };
+  if (robotWantedOn()) robotSetOn(true);
   var robotSymEl = document.getElementById("robotSym");
   if (robotSymEl) robotSymEl.addEventListener("change", function(){
     var ta = document.getElementById("robotData");
@@ -2391,6 +2406,7 @@
   function robotStopAuto(reason){
     if (robotTimer){ clearInterval(robotTimer); robotTimer = null; }
     robotOn = false;
+    robotPersistOn();
     var box = document.getElementById("robotStatus");
     var txt = document.getElementById("robotStatusTxt");
     if (box) box.classList.remove("on");
@@ -2421,6 +2437,7 @@
         robotStopAuto("أوقفه Muse — خسائر متتالية");
         banner("<strong>⛔ الروبوت توقّف تلقائياً:</strong> سجّلت 3 خسائر متتالية بسجل الروبوت — هاي قاعدة استراتيجية Muse المُدارة. راجع السوق قبل ما تشغّله من جديد.");
         if (window.ScalpNotify) window.ScalpNotify("⛔ الروبوت توقّف تلقائياً", "3 خسائر متتالية مسجّلة بسجل الروبوت — توقّف وراجع قبل إعادة التشغيل.", null);
+        if (window.AndroidBridge && AndroidBridge.signal){ try { AndroidBridge.signal("⛔ الروبوت توقّف تلقائياً", "3 خسائر متتالية مسجّلة بسجل الروبوت — توقّف وراجع قبل إعادة التشغيل."); } catch (e) {} }
       }
     }
     robotLossLineUpdate();
