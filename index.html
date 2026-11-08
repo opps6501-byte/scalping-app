@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-09-v28" />
+<meta name="app-version" content="2026-11-09-v29" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -632,7 +632,7 @@
   }
 
   // ---- version self-check (anti-stale) ----
-  var PAGE_VERSION = "2026-11-09-v28";
+  var PAGE_VERSION = "2026-11-09-v29";
   window.ScalpPageVersion = PAGE_VERSION;
   setTimeout(function(){
     try {
@@ -2692,7 +2692,10 @@
   });
   var alTest = document.getElementById("alTest");
   if (alTest) alTest.addEventListener("click", function(){
-    function go(){ if (window.ScalpNotify) window.ScalpNotify("إشارة تجريبية — XAU/USD شراء", "هذا اختبار من خانة الإشعارات: الصوت والاهتزاز والشريط حسب إعداداتك الحالية.", "XAUUSD"); }
+    function go(){
+      if (window.ScalpNotify) window.ScalpNotify("🔔 إشارة تجريبية", "هذا اختبار من خانة الإشعارات: الصوت والاهتزاز والشريط حسب إعداداتك الحالية.", "XAUUSD");
+      if (window.AndroidBridge && AndroidBridge.signal){ try { AndroidBridge.signal("🔔 إشارة تجريبية", "إذا وصلك هذا كإشعار نظام، فإشعارات الروبوت بالخلفية شغّالة."); } catch (e) {} }
+    }
     if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().then(go);
     else go();
   });
