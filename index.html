@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-09-v27" />
+<meta name="app-version" content="2026-11-09-v28" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -632,7 +632,7 @@
   }
 
   // ---- version self-check (anti-stale) ----
-  var PAGE_VERSION = "2026-11-09-v27";
+  var PAGE_VERSION = "2026-11-09-v28";
   window.ScalpPageVersion = PAGE_VERSION;
   setTimeout(function(){
     try {
@@ -2193,6 +2193,22 @@
     keys.forEach(function(k){
       var s = window.ScalpSymbols[k];
       var candles = robotCandlesFor(k);
+      var candles5 = robotCandles5For(k);
+      // Dual timeframe (Muse's call, 2026-11-09): M5 is the entry trigger,
+      // M15 is the trend guard — a 5-minute trigger fires only when the
+      // 15-minute vote bias does not oppose it. Without 5-minute data the
+      // robot falls back to the 15-minute-only path.
+      if (candles5.length >= need){
+        var sig5 = window.ScalpStrategy.checkSignal(k, candles5);
+        var use5 = !!(sig5.long || sig5.short);
+        if (use5 && candles.length >= need){
+          var sigT = window.ScalpStrategy.checkSignal(k, candles);
+          if ((sig5.long && sigT.votes < 0) || (sig5.short && sigT.votes > 0)) use5 = false;
+          else sig5.reason += " · اتجاه ربع ساعة مؤيّد";
+        }
+        if (use5){ results.push({ key:k, s:s, ok:true, count:candles5.length, sig:sig5, score:sig5.score, candles:candles5 }); return; }
+        if (candles.length < need){ results.push({ key:k, s:s, ok:true, count:candles5.length, sig:sig5, score:sig5.score, candles:candles5 }); return; }
+      }
       if (candles.length < need){ results.push({ key:k, s:s, ok:false, count:candles.length, score:0 }); return; }
       var sig = window.ScalpStrategy.checkSignal(k, candles);
       results.push({ key:k, s:s, ok:true, count:candles.length, sig:sig, score:sig.score, candles:candles });
@@ -2301,6 +2317,14 @@
     var ta = document.getElementById("robotData");
     if (sel && ta && sel.value === key) ta.value = text;
   };
+  var robotData5BySym = {};
+  window.ScalpRobotSetCandles5 = function(key, text){
+    if (!key || typeof text !== "string" || !text.length) return;
+    robotData5BySym[key] = text;
+  };
+  function robotCandles5For(k){
+    return parseCandles(robotData5BySym[k] || "");
+  }
   function robotReportWatch(){
     if (window.AndroidBridge && AndroidBridge.watchList){
       try { AndroidBridge.watchList(JSON.stringify(visibleRobotKeys())); } catch (e) {}
