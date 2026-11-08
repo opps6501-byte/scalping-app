@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-09-v25" />
+<meta name="app-version" content="2026-11-09-v26" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -632,7 +632,7 @@
   }
 
   // ---- version self-check (anti-stale) ----
-  var PAGE_VERSION = "2026-11-09-v25";
+  var PAGE_VERSION = "2026-11-09-v26";
   window.ScalpPageVersion = PAGE_VERSION;
   setTimeout(function(){
     try {
@@ -2239,13 +2239,14 @@
       robotEntrySeq++;
       var sigNow = new Date(), sigH = sigNow.getHours(), sigM = sigNow.getMinutes();
       var sigTime = (sigH < 10 ? "0" : "") + sigH + ":" + (sigM < 10 ? "0" : "") + sigM;
-      var sigBody = "🕐 وقت الإشارة: " + sigTime +
+      var sigDate = sigNow.getFullYear() + "-" + ((sigNow.getMonth() + 1) < 10 ? "0" : "") + (sigNow.getMonth() + 1) + "-" + (sigNow.getDate() < 10 ? "0" : "") + sigNow.getDate();
+      var sigBody = "🕐 " + sigTime + " · " + sigDate +
         "\n🎯 نقطة الدخول: " + lastClose.toFixed(s.dec) +
         "\n🛑 وقف الخسارة: " + sl.toFixed(s.dec) +
         "\n🏁 الهدف: " + tp.toFixed(s.dec) +
         "\n📦 اللوت: " + lot.toFixed(2) + " · 💵 المخاطرة: $" + riskShown.toFixed(2);
       robotAddLog("<strong>🤖 إشارة روبوت — " + dirTxt + " " + s.disp + "</strong>" +
-        '<div class="meta">🕐 وقت الإشارة: <span class="num">' + sigTime + '</span></div>' +
+        '<div class="meta" style="font-size:11px;opacity:.65">🕐 <span class="num">' + sigTime + '</span> · <span class="num">' + sigDate + '</span></div>' +
         '<div class="meta">🎯 نقطة الدخول: <span class="num">' + lastClose.toFixed(s.dec) + '</span></div>' +
         '<div class="meta">🛑 وقف الخسارة: <span class="num">' + sl.toFixed(s.dec) + '</span></div>' +
         '<div class="meta">🏁 الهدف: <span class="num">' + tp.toFixed(s.dec) + '</span></div>' +
