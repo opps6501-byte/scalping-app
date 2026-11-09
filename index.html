@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-09-v31" />
+<meta name="app-version" content="2026-11-09-v32" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -632,7 +632,7 @@
   }
 
   // ---- version self-check (anti-stale) ----
-  var PAGE_VERSION = "2026-11-09-v31";
+  var PAGE_VERSION = "2026-11-09-v32";
   window.ScalpPageVersion = PAGE_VERSION;
   setTimeout(function(){
     try {
@@ -2194,6 +2194,12 @@
       var s = window.ScalpSymbols[k];
       var candles = robotCandlesFor(k);
       var candles5 = robotCandles5For(k);
+      // Closed candles only (Muse fix, 2026-11-09): the last row of each
+      // fetched series is the still-forming candle — the robot must never
+      // judge a candle that has not closed (a mid-candle dip fired the
+      // 2026-11-09 03:04 gold sell that reversed within the same candle).
+      if (candles.length > 1) candles = candles.slice(0, candles.length - 1);
+      if (candles5.length > 1) candles5 = candles5.slice(0, candles5.length - 1);
       // Dual timeframe (Muse's call, 2026-11-09): M5 is the entry trigger,
       // M15 is the trend guard — a 5-minute trigger fires only when the
       // 15-minute vote bias does not oppose it. Without 5-minute data the
