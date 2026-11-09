@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-09-v35" />
+<meta name="app-version" content="2026-11-09-v36" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -640,7 +640,7 @@
   // flood continued (AUD/JPY sells, 10:01-10:03). Reload only when the
   // served version number is strictly newer, so cache flip-flops in the
   // check fetch cannot cause a reload loop.
-  var PAGE_VERSION = "2026-11-09-v35";
+  var PAGE_VERSION = "2026-11-09-v36";
   window.ScalpPageVersion = PAGE_VERSION;
   function scalpVerNum(v){ var mm = /-v(\d+)$/.exec(v || ""); return mm ? parseInt(mm[1], 10) : -1; }
   function scalpCheckFresh(){
@@ -2189,6 +2189,55 @@
     robotLogArr.slice(0, 20).forEach(function(h){
       var d = document.createElement("div"); d.className = "log-item"; d.innerHTML = h; list.appendChild(d);
     });
+    robotLogSave();
+  }
+  // v36 (2026-11-09, Ali: «السجل يختفي»): the signal log lived only in
+  // page memory, so every page reload (force-stop, process restart,
+  // update reload) wiped it. Persist the rendered log + the marking
+  // state (counted entries, consecutive-loss counter, entry sequence)
+  // in localStorage and restore it on load, before the robot resumes.
+  var ROBOT_LOG_KEY = "scalping-robot-log-v1";
+  var robotLogSavedCounted = null, robotLogSavedConsec = 0, robotLogSavedSeq = 0;
+  function robotLogSave(){
+    try {
+      var nodes = document.querySelectorAll("#robotLog .log-item");
+      var items = [];
+      nodes.forEach(function(d){ items.push(d.innerHTML); });
+      if (!items.length && !robotLogArr.length) return;
+      localStorage.setItem(ROBOT_LOG_KEY, JSON.stringify({
+        items: items.slice(0, 20),
+        counted: (typeof robotCounted !== "undefined") ? robotCounted : null,
+        consec: (typeof robotConsecLoss !== "undefined") ? robotConsecLoss : 0
+      }));
+    } catch (e) {}
+  }
+  function robotLogRestore(){
+    var raw = null;
+    try { raw = JSON.parse(localStorage.getItem(ROBOT_LOG_KEY) || "null"); } catch (e) {}
+    if (!raw || !raw.items || !raw.items.length) return;
+    robotLogArr = raw.items.slice(0, 20);
+    robotLogSavedCounted = raw.counted || null;
+    robotLogSavedConsec = raw.consec || 0;
+    robotLogArr.forEach(function(h){
+      var m = /data-entry="r(\d+)"/.exec(h);
+      if (m) robotLogSavedSeq = Math.max(robotLogSavedSeq, parseInt(m[1], 10));
+    });
+    for (var i = 0; i < robotLogArr.length; i++){
+      if (robotLogArr[i].indexOf("نقطة الدخول") !== -1){
+        var lat = document.getElementById("robotLatest");
+        if (lat) lat.innerHTML = robotLogArr[i];
+        break;
+      }
+    }
+    var empty = document.getElementById("robotLogEmpty");
+    if (empty) empty.style.display = "none";
+    var list = document.getElementById("robotLog");
+    if (list){
+      list.innerHTML = "";
+      robotLogArr.forEach(function(h){
+        var d = document.createElement("div"); d.className = "log-item"; d.innerHTML = h; list.appendChild(d);
+      });
+    }
   }
   function renderWatchState(results, minScore){
     var wl = document.getElementById("robotWatchList");
@@ -2381,6 +2430,7 @@
       try { AndroidBridge.watchList(JSON.stringify(visibleRobotKeys())); } catch (e) {}
     }
   }
+  robotLogRestore();
   if (robotWantedOn()) robotSetOn(true);
   var robotSymEl = document.getElementById("robotSym");
   if (robotSymEl) robotSymEl.addEventListener("change", function(){
@@ -2501,6 +2551,11 @@
   /* ===== Robot: consecutive-loss auto-stop (Claude-managed risk rule) ===== */
   var robotConsecLoss = 0;
   var robotCounted = {}, robotEntrySeq = 0;
+  // v36: apply the marking state restored from the persisted log.
+  if (robotLogSavedCounted) robotCounted = robotLogSavedCounted;
+  if (robotLogSavedConsec) robotConsecLoss = robotLogSavedConsec;
+  if (robotLogSavedSeq) robotEntrySeq = robotLogSavedSeq;
+  if (robotLogSavedConsec && typeof robotLossLineUpdate === "function") robotLossLineUpdate();
   function robotStopAuto(reason){
     if (robotTimer){ clearInterval(robotTimer); robotTimer = null; }
     robotOn = false;
@@ -2539,6 +2594,7 @@
       }
     }
     robotLossLineUpdate();
+    robotLogSave();
   });
 
   /* ===== Market items tester (Lab) ===== */
