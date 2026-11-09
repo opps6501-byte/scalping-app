@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-09-v32" />
+<meta name="app-version" content="2026-11-09-v33" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -632,7 +632,7 @@
   }
 
   // ---- version self-check (anti-stale) ----
-  var PAGE_VERSION = "2026-11-09-v32";
+  var PAGE_VERSION = "2026-11-09-v33";
   window.ScalpPageVersion = PAGE_VERSION;
   setTimeout(function(){
     try {
@@ -674,7 +674,7 @@
     customSymbols: [],
     customStrategies: [],
     marketItems: [],
-    robot: { minScore:60, lotMode:"auto", fixedLot:0.01, maxDaily:0, balance:5, riskPct:2 },
+    robot: { minScore:80, lotMode:"auto", fixedLot:0.01, maxDaily:0, balance:5, riskPct:2 },
     robotWatch: { XAUUSD:true, EURUSD:true, GBPUSD:true, USDJPY:true },
     removedPairs: [],
     managedV: 0
@@ -746,11 +746,16 @@
     useEma:true, useRsi:true, useMacd:true, useStoch:false, useBoll:false,
     macdFast:12, macdSlow:26, macdSignal:9, stochPeriod:14, stochLow:20, stochHigh:80,
     bollPeriod:20, bollDev:2 };
-  if ((settings.managedV || 0) < 12){
+  if ((settings.managedV || 0) < 13){
     Object.keys(CLAUDE_STRATEGY).forEach(function(k){ settings.strategy[k] = CLAUDE_STRATEGY[k]; });
     settings.risk.riskPct = 2;
     settings.risk.dailyLossLimit = 0.5;
-    settings.managedV = 12;
+    // v33 (2026-11-09, Ali approved «بدله»): one-month backtest showed the
+    // minScore-60 setting has no edge (39.6% target vs 40% breakeven, gold
+    // worst at 34.7%); minScore 80 backtested at 42.5% on the same month.
+    // Managed pin — overrides any saved 60 on Ali's phone.
+    if (settings.robot) settings.robot.minScore = 80;
+    settings.managedV = 13;
     try { localStorage.setItem(LS_KEY, JSON.stringify(settings)); } catch (e) {}
   }
   // v17: the robot panel's money fields are the source of truth — the amount
@@ -2348,7 +2353,7 @@
   /* ===== Ali's robot control panel (v14): lot mode, robot pairs, daily cap ===== */
   var robotSignalsToday = 0;
   function robotCfg(){
-    if (!S().robot) S().robot = { minScore:60, lotMode:"auto", fixedLot:0.01, maxDaily:0, balance:5, riskPct:2 };
+    if (!S().robot) S().robot = { minScore:80, lotMode:"auto", fixedLot:0.01, maxDaily:0, balance:5, riskPct:2 };
     var rc = S().robot;
     if (!(rc.balance > 0)) rc.balance = S().risk.balance > 0 ? S().risk.balance : 5;
     if (!(rc.riskPct > 0)) rc.riskPct = S().risk.riskPct || 2;
