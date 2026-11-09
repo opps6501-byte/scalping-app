@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-09-v33" />
+<meta name="app-version" content="2026-11-09-v34" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -632,7 +632,7 @@
   }
 
   // ---- version self-check (anti-stale) ----
-  var PAGE_VERSION = "2026-11-09-v33";
+  var PAGE_VERSION = "2026-11-09-v34";
   window.ScalpPageVersion = PAGE_VERSION;
   setTimeout(function(){
     try {
@@ -2100,6 +2100,33 @@
   }
   var robotDataBySym = {};
   var robotFired = {};
+  // v34 (2026-11-09, Ali's call): one open trade per pair. When a signal
+  // fires, the pair is locked — no new signal on it in either direction —
+  // until the trade resolves (a later closed candle touches its target or
+  // its stop) or 24h pass. Before this, the dedupe key included the entry
+  // price, which drifts with every data refresh, so the same setup re-fired
+  // every minute (EUR/AUD + EUR/CAD flood, 2026-11-09 09:22-09:24).
+  var ROBOT_OPEN_KEY = "scalping-open-signals-v1";
+  var robotOpen = {};
+  try { robotOpen = JSON.parse(localStorage.getItem(ROBOT_OPEN_KEY) || "{}") || {}; } catch (e) { robotOpen = {}; }
+  function robotOpenSave(){ try { localStorage.setItem(ROBOT_OPEN_KEY, JSON.stringify(robotOpen)); } catch (e) {} }
+  function robotResolveOpen(){
+    var changed = false, now = Date.now();
+    Object.keys(robotOpen).forEach(function(k){
+      var o = robotOpen[k];
+      if (!o || now - o.t > 24 * 3600 * 1000){ delete robotOpen[k]; changed = true; return; }
+      var arr = (o.tf === "5" ? robotCandles5For(k) : robotCandlesFor(k));
+      if (arr.length > 1) arr = arr.slice(0, arr.length - 1);
+      for (var i = o.n || 0; i < arr.length; i++){
+        var c = arr[i], hit = false;
+        if (o.dir > 0){ if (c.low <= o.sl || c.high >= o.tp) hit = true; }
+        else { if (c.high >= o.sl || c.low <= o.tp) hit = true; }
+        if (hit){ delete robotOpen[k]; changed = true; return; }
+      }
+      if (arr.length !== (o.n || 0)){ o.n = arr.length; changed = true; }
+    });
+    if (changed) robotOpenSave();
+  }
   var robotLastResults = [];
   function robotStoreCurrent(){
     var sel = document.getElementById("robotSym");
@@ -2217,14 +2244,15 @@
           if ((sig5.long && sigT.votes < 0) || (sig5.short && sigT.votes > 0)) use5 = false;
           else sig5.reason += " · اتجاه ربع ساعة مؤيّد";
         }
-        if (use5){ results.push({ key:k, s:s, ok:true, count:candles5.length, sig:sig5, score:sig5.score, candles:candles5 }); return; }
-        if (candles.length < need){ results.push({ key:k, s:s, ok:true, count:candles5.length, sig:sig5, score:sig5.score, candles:candles5 }); return; }
+        if (use5){ results.push({ key:k, s:s, ok:true, count:candles5.length, sig:sig5, score:sig5.score, candles:candles5, tf:"5" }); return; }
+        if (candles.length < need){ results.push({ key:k, s:s, ok:true, count:candles5.length, sig:sig5, score:sig5.score, candles:candles5, tf:"5" }); return; }
       }
       if (candles.length < need){ results.push({ key:k, s:s, ok:false, count:candles.length, score:0 }); return; }
       var sig = window.ScalpStrategy.checkSignal(k, candles);
-      results.push({ key:k, s:s, ok:true, count:candles.length, sig:sig, score:sig.score, candles:candles });
+      results.push({ key:k, s:s, ok:true, count:candles.length, sig:sig, score:sig.score, candles:candles, tf:"15" });
     });
     robotLastResults = results;
+    robotResolveOpen();
     renderWatchState(results, minScore);
     if (gateBlocked()){
       if (robotOn) gateShowBlocked();
@@ -2238,6 +2266,7 @@
     // internal quality gate and protections (stored maxDaily stays dormant).
     opps.forEach(function(r){
       var s = r.s, sig = r.sig;
+      if (robotOpen[r.key]) return; // v34: this pair already has an open trade — wait for it to resolve
       var lastClose = r.candles[r.candles.length - 1].close;
       var fp = r.key + "|" + (sig.long ? "L" : "S") + "|" + lastClose;
       if (robotFired[fp]) return;
@@ -2247,6 +2276,8 @@
       var sign = sig.long ? 1 : -1;
       var slDist = st.slMult * atr;
       var sl = lastClose - sign * slDist, tp = lastClose + sign * st.tpMult * atr;
+      robotOpen[r.key] = { dir: sign, sl: sl, tp: tp, t: Date.now(), n: r.candles.length, tf: r.tf || "15" };
+      robotOpenSave();
       var vpu = s.quoteUSD ? s.contract : (lastClose > 0 ? s.contract / lastClose : s.contract);
       var rcfg = S().robot || {};
       // v17: the auto lot is computed from the amount Ali set in the robot
