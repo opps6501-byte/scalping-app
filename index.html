@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-09-v34" />
+<meta name="app-version" content="2026-11-09-v35" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -632,14 +632,24 @@
   }
 
   // ---- version self-check (anti-stale) ----
-  var PAGE_VERSION = "2026-11-09-v34";
+  // v35: the check now repeats every 3 minutes (and when the app returns
+  // to the foreground), not only once at load. The APK's foreground
+  // service keeps this page alive indefinitely — after Ali's HONOR
+  // battery fix (2026-11-09) the load-time-only check meant the v34
+  // per-pair lock never reached his still-open page and the repeat
+  // flood continued (AUD/JPY sells, 10:01-10:03). Reload only when the
+  // served version number is strictly newer, so cache flip-flops in the
+  // check fetch cannot cause a reload loop.
+  var PAGE_VERSION = "2026-11-09-v35";
   window.ScalpPageVersion = PAGE_VERSION;
-  setTimeout(function(){
+  function scalpVerNum(v){ var mm = /-v(\d+)$/.exec(v || ""); return mm ? parseInt(mm[1], 10) : -1; }
+  function scalpCheckFresh(){
     try {
       var url = window.location.pathname + "?__fresh=" + Date.now();
       fetch(url, { cache: "no-store" }).then(function(res){ return res.text(); }).then(function(txt){
         var m = txt.match(/app-version" content="([^"]+)"/);
         if (!m || m[1] === PAGE_VERSION) return;
+        if (scalpVerNum(m[1]) <= scalpVerNum(PAGE_VERSION)) return;
         var guard = null;
         try { guard = sessionStorage.getItem("scalp-fresh-guard"); } catch (e) {}
         if (guard === m[1]) return;
@@ -647,7 +657,10 @@
         window.location.reload();
       })["catch"](function(){});
     } catch (e) {}
-  }, 1200);
+  }
+  setTimeout(scalpCheckFresh, 1200);
+  setInterval(scalpCheckFresh, 180000);
+  document.addEventListener("visibilitychange", function(){ if (!document.hidden) scalpCheckFresh(); });
 })();
 </script>
 
