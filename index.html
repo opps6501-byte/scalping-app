@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-09-v30" />
+<meta name="app-version" content="2026-11-09-v31" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -632,7 +632,7 @@
   }
 
   // ---- version self-check (anti-stale) ----
-  var PAGE_VERSION = "2026-11-09-v30";
+  var PAGE_VERSION = "2026-11-09-v31";
   window.ScalpPageVersion = PAGE_VERSION;
   setTimeout(function(){
     try {
@@ -2259,16 +2259,12 @@
       var sigBody = "🕐 " + sigTime + " · " + sigDate +
         "\n🎯 نقطة الدخول: " + lastClose.toFixed(s.dec) +
         "\n🛑 وقف الخسارة: " + sl.toFixed(s.dec) +
-        "\n🏁 الهدف: " + tp.toFixed(s.dec) +
-        "\n📦 اللوت: " + lot.toFixed(2) + " · 💵 المخاطرة: $" + riskShown.toFixed(2);
+        "\n🏁 الهدف: " + tp.toFixed(s.dec);
       robotAddLog("<strong>" + s.disp + " — " + (sig.long ? "شراء" : "بيع") + "</strong>" +
         '<div class="meta" style="font-size:11px;opacity:.65">🕐 <span class="num">' + sigTime + '</span> · <span class="num">' + sigDate + '</span></div>' +
         '<div class="meta">🎯 نقطة الدخول: <span class="num">' + lastClose.toFixed(s.dec) + '</span></div>' +
         '<div class="meta">🛑 وقف الخسارة: <span class="num">' + sl.toFixed(s.dec) + '</span></div>' +
         '<div class="meta">🏁 الهدف: <span class="num">' + tp.toFixed(s.dec) + '</span></div>' +
-        '<div class="meta">📦 اللوت: <span class="num">' + lot.toFixed(2) + '</span>' + (rcfg.lotMode === "fixed" ? " (ثابت من تحكّمك)" : "") + " · 💵 المخاطرة: $" + riskShown.toFixed(2) + " · اجتازت فحص Muse الكامل</div>" +
-        '<div class="meta">' + sig.reason + "</div>" +
-        '<div class="meta">نفّذ يدوياً في MT5 إذا اقتنعت — الروبوت ما ينفّذ وحده. نفّذتها؟ علّم نتيجتها حتى يعدّ الروبوت الخسائر المتتالية:</div>' +
         '<div class="log-actions" data-entry="r' + robotEntrySeq + '"><button type="button" class="chip" data-robot-result="win">نفّذتها — ربح</button><button type="button" class="chip" data-robot-result="loss">نفّذتها — خسارة</button><button type="button" class="chip" data-robot-result="skip">تجاهلتها</button></div>');
       if (window.ScalpNotify) window.ScalpNotify(s.disp + " — " + (sig.long ? "شراء" : "بيع"), sigBody, r.key);
       if (window.AndroidBridge && AndroidBridge.signal){ try { AndroidBridge.signal(s.disp + " — " + (sig.long ? "شراء" : "بيع"), sigBody); } catch (e) {} }
