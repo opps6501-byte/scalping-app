@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-10-v39" />
+<meta name="app-version" content="2026-11-10-v40" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -640,7 +640,7 @@
   // flood continued (AUD/JPY sells, 10:01-10:03). Reload only when the
   // served version number is strictly newer, so cache flip-flops in the
   // check fetch cannot cause a reload loop.
-  var PAGE_VERSION = "2026-11-10-v39";
+  var PAGE_VERSION = "2026-11-10-v40";
   window.ScalpPageVersion = PAGE_VERSION;
   function scalpVerNum(v){ var mm = /-v(\d+)$/.exec(v || ""); return mm ? parseInt(mm[1], 10) : -1; }
   function scalpCheckFresh(){
@@ -2289,6 +2289,22 @@
       }
     }
   }
+  // v40 (2026-11-10): Baghdad-night exclusion, 20:00-24:00 Baghdad. The
+  // deep joint study on 60 days of M5 (backtest/deep_results.json) found
+  // the best-net combo (minScore 80, SL 3 / TP 1.5) nearly doubles its
+  // net when these hours are dropped (+46.5 -> +96 ATR, hit 67.2% ->
+  // 67.9%) — the 2026-11-09 autopsy's lone survivor hypothesis,
+  // confirmed on longer data. Silent like the gate: no reason shown.
+  function robotNightOff(){
+    var h;
+    try {
+      h = +new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Baghdad", hour: "numeric", hour12: false }).format(new Date());
+    } catch (e) {
+      h = new Date().getUTCHours() + 3;
+    }
+    h = ((h % 24) + 24) % 24;
+    return h >= 20;
+  }
   function robotScan(manual){
     robotStoreCurrent();
     robotReportWatch();
@@ -2337,6 +2353,7 @@
     }
     var opps = results.filter(function(r){ return r.ok && (r.sig.long || r.sig.short) && r.score >= minScore && gatePasses(r.sig); })
       .sort(function(a, b){ return b.score - a.score; });
+    if (robotNightOff()) opps = []; // v40: no firing 20:00-24:00 Baghdad
     var firedNow = 0;
     // v20: no user-set daily trade cap — issuance is governed only by Muse's
     // internal quality gate and protections (stored maxDaily stays dormant).
