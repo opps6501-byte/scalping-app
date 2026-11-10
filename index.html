@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-10-v37" />
+<meta name="app-version" content="2026-11-10-v38" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -640,7 +640,7 @@
   // flood continued (AUD/JPY sells, 10:01-10:03). Reload only when the
   // served version number is strictly newer, so cache flip-flops in the
   // check fetch cannot cause a reload loop.
-  var PAGE_VERSION = "2026-11-10-v37";
+  var PAGE_VERSION = "2026-11-10-v38";
   window.ScalpPageVersion = PAGE_VERSION;
   function scalpVerNum(v){ var mm = /-v(\d+)$/.exec(v || ""); return mm ? parseInt(mm[1], 10) : -1; }
   function scalpCheckFresh(){
@@ -677,7 +677,7 @@
       quietStart:"23:00", quietEnd:"07:00", quietEnabled:false, minConfidence:60,
       tone:"chime", volume:80, vibPattern:"double" },
     strategy: { emaFast:9, emaSlow:21, rsiPeriod:14, rsiLow:30, rsiHigh:70,
-      atrPeriod:14, slMult:3, tpMult:1.5, timeframe:15, maxSpread:30,
+      atrPeriod:14, slMult:4, tpMult:1, timeframe:15, maxSpread:30,
       useEma:true, useRsi:true, useMacd:true, useStoch:false, useBoll:false,
       macdFast:12, macdSlow:26, macdSignal:9,
       stochPeriod:14, stochLow:20, stochHigh:80,
@@ -755,11 +755,11 @@
   };
   // Muse's managed strategy for the robot (Ali delegated the choice to Muse).
   var CLAUDE_STRATEGY = { emaFast:9, emaSlow:21, rsiPeriod:14, rsiLow:30, rsiHigh:70,
-    atrPeriod:14, slMult:3, tpMult:1.5, timeframe:15, maxSpread:30,
+    atrPeriod:14, slMult:4, tpMult:1, timeframe:15, maxSpread:30,
     useEma:true, useRsi:true, useMacd:true, useStoch:false, useBoll:false,
     macdFast:12, macdSlow:26, macdSignal:9, stochPeriod:14, stochLow:20, stochHigh:80,
     bollPeriod:20, bollDev:2 };
-  if ((settings.managedV || 0) < 14){
+  if ((settings.managedV || 0) < 15){
     Object.keys(CLAUDE_STRATEGY).forEach(function(k){ settings.strategy[k] = CLAUDE_STRATEGY[k]; });
     settings.risk.riskPct = 2;
     settings.risk.dailyLossLimit = 0.5;
@@ -772,7 +772,11 @@
     // مو تضرب ستوبات مالي شغل بالارباح»): SL 1.5→3 xATR, TP 2.25→1.5 xATR.
     // Sweep over the same 749-signal month set (sweep_hitrate.js): target
     // share 42.5% → 68.3%, still +55.5 ATR in-sample before costs.
-    settings.managedV = 14;
+    // v38 (same day, Ali pushed further: «ماريد قلل الخسائر» then
+    // «الغي الاشارات حتى نبدا جديد»): extended sweep (sweep_extreme.js)
+    // best hit rate at SL 4 xATR / TP 1 xATR — target share 81.7%
+    // (609 target / 136 stop), net +65 ATR in-sample before costs.
+    settings.managedV = 15;
     try { localStorage.setItem(LS_KEY, JSON.stringify(settings)); } catch (e) {}
   }
   // v17: the robot panel's money fields are the source of truth — the amount
@@ -791,7 +795,7 @@
     settings.risk.riskPct = 2; if (settings.robot) settings.robot.riskPct = 2;
     settings.risk.dailyLossLimit = Math.round(((settings.robot && settings.robot.balance) || 5) * 0.1 * 100) / 100; settings.managedV = 12;
     saveSettings(); refreshUI(); applyToPage();
-    if (window.ScalpBanner) window.ScalpBanner("<strong>🎛️ استراتيجية Muse المُدارة:</strong> طُبّقت على الروبوت والحاسبة — EMA 9/21 + تأكيد MACD + فلتر RSI، وقف 3×ATR وهدف 1.5×ATR على M15، مخاطرة 2% وحد خسارة يومي $0.50.");
+    if (window.ScalpBanner) window.ScalpBanner("<strong>🎛️ استراتيجية Muse المُدارة:</strong> طُبّقت على الروبوت والحاسبة — EMA 9/21 + تأكيد MACD + فلتر RSI، وقف 4×ATR وهدف 1×ATR على M15، مخاطرة 2% وحد خسارة يومي $0.50.");
   };
   function saveSettings(){
     try { localStorage.setItem(LS_KEY, JSON.stringify(settings)); } catch (e) {}
@@ -2434,6 +2438,15 @@
       try { AndroidBridge.watchList(JSON.stringify(visibleRobotKeys())); } catch (e) {}
     }
   }
+  // v38 (2026-11-10, Ali: «الغي الاشارات الجديده حتى نبدا جديد»): one-time
+  // wipe of the persisted in-app signal log so the new strategy's log
+  // starts fresh on his phone too.
+  try {
+    if ((+localStorage.getItem("scalping-log-epoch") || 1) < 2) {
+      localStorage.removeItem("scalping-robot-log-v1");
+      localStorage.setItem("scalping-log-epoch", "2");
+    }
+  } catch (e) {}
   robotLogRestore();
   if (robotWantedOn()) robotSetOn(true);
   var robotSymEl = document.getElementById("robotSym");
