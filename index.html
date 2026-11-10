@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-10-v41" />
+<meta name="app-version" content="2026-11-10-v42" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -640,7 +640,7 @@
   // flood continued (AUD/JPY sells, 10:01-10:03). Reload only when the
   // served version number is strictly newer, so cache flip-flops in the
   // check fetch cannot cause a reload loop.
-  var PAGE_VERSION = "2026-11-10-v41";
+  var PAGE_VERSION = "2026-11-10-v42";
   window.ScalpPageVersion = PAGE_VERSION;
   function scalpVerNum(v){ var mm = /-v(\d+)$/.exec(v || ""); return mm ? parseInt(mm[1], 10) : -1; }
   function scalpCheckFresh(){
@@ -2355,6 +2355,7 @@
     robotLastResults = results;
     robotResolveOpen();
     renderWatchState(results, minScore);
+    h1bAdvance(gateBlocked()); // v42: hourly retest module (state always advances; fills fire only when not gate-blocked)
     if (gateBlocked()){
       if (robotOn) gateShowBlocked();
       if (manual) toast("الروبوت متوقف مؤقتاً — قرار Muse");
@@ -2464,6 +2465,131 @@
   };
   function robotCandles5For(k){
     return parseCandles(robotData5BySym[k] || "");
+  }
+  // v42 (2026-11-10): HOURLY RETEST module — ADDED alongside the M5 engine
+  // at Ali's direct order («تضيف اكيد مو تبدل — نريد نزيد نسبة الفوز»).
+  // Source: the ORB study's one surviving idea (backtest/orb_test.js,
+  // years form variant B: +0.507 R/trade, 65.7% win, positive in 2024,
+  // 2025 and 2026 and on all 10 instruments — before costs). The spec is
+  // IDENTICAL to the watchdog's shadow.py: range = the H1 candle starting
+  // 09:00 New York; break = first close beyond it among the 10:00/11:00/
+  // 12:00 NY H1 candles; a trade fires ONLY when a later window candle
+  // retests the range MIDLINE; SL beyond the opposite edge + 5% of the
+  // range height; TP = 2R. One such trade per pair per NY day. It is NOT
+  // subject to the M5 night-off (its session is NY-morning by design and
+  // it was studied without that filter). If the pair already has an open
+  // trade at fill time, the fire is skipped (Ali's one-open-trade rule);
+  // a fill is only fired when its candle is the latest closed H1 candle,
+  // so a robot that was off during the session never emits a stale entry.
+  var robotDataHBySym = {};
+  window.ScalpRobotSetCandlesH = function(key, text){
+    if (!key || typeof text !== "string" || !text.length) return;
+    robotDataHBySym[key] = text;
+  };
+  function robotCandlesHFor(k){
+    var out = [];
+    (robotDataHBySym[k] || "").split(/\n+/).forEach(function(line){
+      var t = line.trim().split(/,\s*/).map(parseFloat);
+      if (t.length >= 5 && isFinite(t[0]) && t[1] > 0) out.push({ ts: t[0], open: t[1], high: t[2], low: t[3], close: t[4] });
+    });
+    return out;
+  }
+  var H1B_KEY = "scalping-h1b-v1";
+  var h1bState = {};
+  try { h1bState = JSON.parse(localStorage.getItem(H1B_KEY) || "{}") || {}; } catch (e) { h1bState = {}; }
+  function h1bSave(){ try { localStorage.setItem(H1B_KEY, JSON.stringify(h1bState)); } catch (e) {} }
+  var NYFMT = null;
+  function nyParts(ts){
+    try {
+      if (!NYFMT) NYFMT = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+      var p = {};
+      NYFMT.formatToParts(new Date(ts * 1000)).forEach(function(x){ p[x.type] = x.value; });
+      var hh = +p.hour; if (hh === 24) hh = 0;
+      return { date: p.year + "-" + p.month + "-" + p.day, mins: hh * 60 + (+p.minute) };
+    } catch (e) { return null; }
+  }
+  function h1bFire(k, s, st){
+    var sigNow = new Date(), sigH = sigNow.getHours(), sigM = sigNow.getMinutes();
+    var sigTime = (sigH < 10 ? "0" : "") + sigH + ":" + (sigM < 10 ? "0" : "") + sigM;
+    var sigDate = sigNow.getFullYear() + "-" + ((sigNow.getMonth() + 1) < 10 ? "0" : "") + (sigNow.getMonth() + 1) + "-" + (sigNow.getDate() < 10 ? "0" : "") + sigNow.getDate();
+    var dec = (s && s.dec != null) ? s.dec : 5;
+    var dirTxt = st.dir > 0 ? "شراء" : "بيع";
+    var sigBody = "🕐 " + sigTime + " · " + sigDate +
+      "\n🎯 نقطة الدخول: " + st.entry.toFixed(dec) +
+      "\n🛑 وقف الخسارة: " + st.sl.toFixed(dec) +
+      "\n🏁 الهدف: " + st.tp.toFixed(dec);
+    robotEntrySeq++;
+    robotAddLog("<strong>" + s.disp + " — " + dirTxt + "</strong>" +
+      '<div class="meta" style="font-size:11px;opacity:.65">🕐 <span class="num">' + sigTime + '</span> · <span class="num">' + sigDate + '</span></div>' +
+      '<div class="meta">🎯 نقطة الدخول: <span class="num">' + st.entry.toFixed(dec) + '</span></div>' +
+      '<div class="meta">🛑 وقف الخسارة: <span class="num">' + st.sl.toFixed(dec) + '</span></div>' +
+      '<div class="meta">🏁 الهدف: <span class="num">' + st.tp.toFixed(dec) + '</span></div>' +
+      '<div class="log-actions" data-entry="r' + robotEntrySeq + '"><button type="button" class="chip" data-robot-result="win">نفّذتها — ربح</button><button type="button" class="chip" data-robot-result="loss">نفّذتها — خسارة</button><button type="button" class="chip" data-robot-result="skip">تجاهلتها</button></div>');
+    if (window.ScalpNotify) window.ScalpNotify(s.disp + " — " + dirTxt, sigBody, k);
+    if (window.AndroidBridge && AndroidBridge.signal){ try { AndroidBridge.signal(s.disp + " — " + dirTxt, sigBody); } catch (e) {} }
+    robotOpen[k] = { dir: st.dir, sl: st.sl, tp: st.tp, t: Date.now(), n: robotCandles5For(k).length, tf: "5" };
+    robotOpenSave();
+    robotSignalsToday++;
+    if (typeof renderRobotControl === "function") renderRobotControl();
+  }
+  function h1bAdvance(blocked){
+    if (!robotOn) return;
+    var nowS = Math.floor(Date.now() / 1000);
+    var today = nyParts(nowS); if (!today) return;
+    var changed = false;
+    visibleRobotKeys().forEach(function(k){
+      var s = window.ScalpSymbols[k]; if (!s) return;
+      var st = h1bState[k];
+      if (!st || st.date !== today.date){ st = h1bState[k] = { date: today.date, phase: "await_or", lastTs: 0 }; changed = true; }
+      if (st.phase === "done" || st.phase === "expired" || st.phase === "no_break") return;
+      var candles = robotCandlesHFor(k);
+      if (!candles.length) return;
+      var byMin = {}, latestClosedTs = 0;
+      candles.forEach(function(cd){
+        if (cd.ts + 3600 > nowS) return; // closed candles only
+        if (cd.ts > latestClosedTs) latestClosedTs = cd.ts;
+        var np = nyParts(cd.ts); if (!np || np.date !== st.date) return;
+        if (np.mins === 540 || np.mins === 600 || np.mins === 660 || np.mins === 720) byMin[np.mins] = cd;
+      });
+      var orCd = byMin[540];
+      if (st.phase === "await_or"){
+        if (!orCd) return;
+        if (!(orCd.high > orCd.low)){ st.phase = "no_break"; changed = true; return; }
+        st.or = { top: orCd.high, bottom: orCd.low, mid: (orCd.high + orCd.low) / 2 };
+        st.phase = "wait_break"; changed = true;
+      }
+      if (!st.or) return;
+      var top = st.or.top, bottom = st.or.bottom, mid = st.or.mid, height = top - bottom;
+      [600, 660, 720].forEach(function(mins){
+        if (st.phase === "done" || st.phase === "expired" || st.phase === "no_break") return;
+        var cd = byMin[mins]; if (!cd) return;
+        if (cd.ts <= (st.lastTs || 0)) return;
+        st.lastTs = cd.ts; changed = true;
+        if (st.phase === "wait_break"){
+          var d = cd.close > top ? 1 : (cd.close < bottom ? -1 : 0);
+          if (d){
+            st.dir = d; st.entry = mid;
+            st.sl = d > 0 ? bottom - 0.05 * height : top + 0.05 * height;
+            st.risk = Math.abs(mid - st.sl);
+            st.tp = mid + d * 2 * st.risk;
+            st.phase = "armed";
+          }
+        } else if (st.phase === "armed"){
+          if ((st.dir > 0 && cd.close < bottom) || (st.dir < 0 && cd.close > top)){ st.phase = "expired"; return; }
+          var touch = st.dir > 0 ? (cd.low <= mid) : (cd.high >= mid);
+          if (touch){
+            st.phase = "done";
+            if (!blocked && !robotOpen[k] && cd.ts === latestClosedTs) h1bFire(k, s, st);
+          }
+        }
+      });
+      var wLast = byMin[720];
+      if (wLast && (st.lastTs || 0) >= wLast.ts){
+        if (st.phase === "armed"){ st.phase = "expired"; changed = true; }
+        if (st.phase === "wait_break"){ st.phase = "no_break"; changed = true; }
+      }
+    });
+    if (changed) h1bSave();
   }
   function robotReportWatch(){
     if (window.AndroidBridge && AndroidBridge.watchList){
