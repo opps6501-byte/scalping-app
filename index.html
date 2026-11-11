@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-11-v44" />
+<meta name="app-version" content="2026-11-11-v47" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -640,7 +640,7 @@
   // flood continued (AUD/JPY sells, 10:01-10:03). Reload only when the
   // served version number is strictly newer, so cache flip-flops in the
   // check fetch cannot cause a reload loop.
-  var PAGE_VERSION = "2026-11-11-v44";
+  var PAGE_VERSION = "2026-11-11-v47";
   window.ScalpPageVersion = PAGE_VERSION;
   function scalpVerNum(v){ var mm = /-v(\d+)$/.exec(v || ""); return mm ? parseInt(mm[1], 10) : -1; }
   function scalpCheckFresh(){
@@ -933,7 +933,7 @@
     return { mid: mid, up: up, dn: dn, pos: pos };
   }
 
-  function checkSignal(symbol, candles){
+  function checkSignal(symbol, candles, guard){
     var st = settings.strategy;
     var none = { long:false, short:false, score:0, votes:0, maxVotes:0, rsi:null, atr:null, reason:"بيانات شموع غير كافية" };
     var needMin = Math.max(st.useEma ? st.emaSlow : 0, st.useRsi ? st.rsiPeriod : 0, st.atrPeriod,
@@ -1011,15 +1011,1545 @@
     if ((votes >= maxVotes * 0.55 && blockLong) || (votes <= -maxVotes * 0.55 && blockShort))
       reasons.push("الإشارة محجوبة بفلتر التشبّع/الاتجاه");
     if (!volOk) reasons.push("تقلّب ATR غير مناسب");
+    // v47: grand-merge guard layer (S3) — only when the caller
+    // supplies the merged context (the robot's M5 trigger call does).
+    if (guard && guard.gmCtx && (long || short)){
+      try {
+        var gmAtr47 = atr != null ? atr : guard.gmCtx.atr5[guard.gmCtx.n5 - 1];
+        if (long && gmCountAt(guard.gmCtx, guard.gmCtx.n5 - 1, true, closes[i1], gmAtr47).count >= 3) long = false;
+        else if (short && gmCountAt(guard.gmCtx, guard.gmCtx.n5 - 1, false, closes[i1], gmAtr47).count >= 3) short = false;
+      } catch (e) {}
+    }
     return { long:long, short:short, score:Math.min(100, score), votes:votes, maxVotes:maxVotes, rsi:rsi, atr:atr,
              reason: reasons.join(" · "),
              meetsThreshold: score >= settings.notifications.minConfidence };
   }
 
+
+  // v47 (2026-11-11): GRAND MERGE — Ali's order: merge everything proven
+  // with the robot's strategy. Phase-1 calibration (backtest/
+  // grandmerge_summary.md): candidate pool = baseline signals + 25
+  // standalone engine cohorts (53,360 engine trades), every candidate
+  // judged by the full 20-veto guard layer; the picked architecture is
+  // S3 — a candidate is blocked iff >= 3 of the 20 vetoes block it
+  // (kept 1,808, 42.59% target, +291.25 ATR, +0.1611/trade, both halves
+  // positive, ex-best +136.25 on the 60-day frame; all 20 veto flags and
+  // all 25 engine cohorts reproduced their study numbers EXACTLY in the
+  // calibration). The 20 vetoes: schools F2, K, I, P1, H, V, G2, T;
+  // Heikin Ashi wick; batch V1 (CCI exhaustion), V2 (Envelopes chase),
+  // V3 (PSAR against), V4 (Fibonacci-pivot room), V5 (Fib-extension
+  // room), V6 (M15 candlestick composite), V7 (pitchfork room); web VZ
+  // (z-stretch), VSINE (Ehlers Sinewave direction), VTTM (TTM squeeze),
+  // VUO (Ultimate Oscillator exhaustion). The engines (E1-E8, P, W) are
+  // additional signal sources judged by the same guard layer. Every
+  // function fails OPEN on missing/insufficient data. The guard runs
+  // only when the caller supplies a context (guard.gmCtx) built by
+  // gmBuildCtx — the robot's M5 fire path does; other callers keep the
+  // exact pre-v47 behaviour. H1B logic is untouched.
+  // NEWS GATE (Ali, 2026-11-11 ~20:30 Baghdad: the news must also be
+  // monitored in the robot): NEWS_EVENTS is a scheduled high-impact
+  // events table embedded in the page (no network): [unixTs, currency]
+  // — FOMC, US NFP, US CPI, US retail sales, US GDP, ECB, BoE and BoJ
+  // decisions, 2026-09-04 -> 2027-06-25 (67 events, official calendars;
+  // backtest/news_events_gen.py). newsBlockedFor(key, tsSec) blocks a
+  // signal whose decision instant falls 30 min before to 60 min after
+  // an event relevant to the pair's currencies; USD events block
+  // everything including gold. Fail-open if the table is missing or
+  // corrupt. Silent in the UI exactly like CLAUDE_GATE.
+  var NEWS_EVENTS = [[1788525000,"USD"],[1789042500,"EUR"],[1789129800,"USD"],[1789561800,"USD"],[1789581600,"USD"],[1789642800,"GBP"],[1789700400,"JPY"],[1790944200,"USD"],[1791981000,"USD"],[1792067400,"USD"],[1793210400,"USD"],[1793277000,"USD"],[1793279700,"EUR"],[1793329200,"JPY"],[1793880000,"GBP"],[1793971800,"USD"],[1794317400,"USD"],[1794922200,"USD"],[1795613400,"USD"],[1796391000,"USD"],[1796842800,"USD"],[1796909400,"USD"],[1797427800,"USD"],[1797508800,"GBP"],[1797513300,"EUR"],[1797562800,"JPY"],[1798032600,"USD"],[1799415000,"USD"],[1799847000,"USD"],[1800019800,"USD"],[1800586800,"JPY"],[1801076400,"USD"],[1801143000,"USD"],[1801742400,"GBP"],[1801746900,"EUR"],[1801834200,"USD"],[1802352600,"USD"],[1802871000,"USD"],[1803562200,"USD"],[1804253400,"USD"],[1804685400,"USD"],[1805200200,"USD"],[1805306400,"USD"],[1805338800,"JPY"],[1805371200,"GBP"],[1805375700,"EUR"],[1806496200,"USD"],[1806669000,"USD"],[1807619400,"USD"],[1807878600,"USD"],[1808881200,"JPY"],[1808935200,"USD"],[1808996400,"GBP"],[1809000900,"EUR"],[1809001800,"USD"],[1809693000,"USD"],[1810125000,"USD"],[1810297800,"USD"],[1811421000,"USD"],[1812112200,"USD"],[1812564000,"USD"],[1812629700,"EUR"],[1812630600,"USD"],[1812682800,"JPY"],[1813149000,"USD"],[1813230000,"GBP"],[1813926600,"USD"]];
+
+  function gmPairCurrencies(key){
+    if (!key) return [];
+    if (key === "XAUUSD" || key === "XAGUSD") return ["USD"];
+    if (/^[A-Z]{6}$/.test(key)) return [key.slice(0, 3), key.slice(3)];
+    return [];
+  }
+  function newsBlockedFor(key, tsSec){
+    try {
+      if (!NEWS_EVENTS || !NEWS_EVENTS.length || !isFinite(tsSec)) return false;
+      var cc = gmPairCurrencies(key);
+      for (var i = 0; i < NEWS_EVENTS.length; i++){
+        var ev = NEWS_EVENTS[i];
+        if (tsSec < ev[0] - 1800) break;
+        if (tsSec > ev[0] + 3600) continue;
+        if (ev[1] === "USD" || cc.indexOf(ev[1]) >= 0) return true;
+      }
+      return false;
+    } catch (e) { return false; }
+  }
+
+  // ---- generic series helpers (ports of the verified Python shadow
+  // modules, themselves line-faithful ports of the study runners) ----
+  function gmAtrP(H, L, C, p){
+    var n = C.length, atr = [], tr = [], i;
+    for (i = 0; i < n; i++){ atr.push(null); tr.push(null); }
+    for (i = 1; i < n; i++) tr[i] = Math.max(H[i] - L[i], Math.abs(H[i] - C[i - 1]), Math.abs(L[i] - C[i - 1]));
+    if (n > p){
+      var a = 0;
+      for (i = 1; i <= p; i++) a += tr[i];
+      a /= p;
+      atr[p] = a;
+      for (i = p + 1; i < n; i++){ a = (a * (p - 1) + tr[i]) / p; atr[i] = a; }
+    }
+    return atr;
+  }
+  function gmSmaNull(vals, p){
+    var n = vals.length, out = [], s = 0, q = [], t;
+    for (t = 0; t < n; t++){
+      var v = vals[t];
+      if (v === null || v === undefined){ s = 0; q = []; out.push(null); continue; }
+      q.push(v); s += v;
+      if (q.length > p) s -= q.shift();
+      out.push(q.length === p ? s / p : null);
+    }
+    return out;
+  }
+  function gmEmaWeb(vals, p){
+    var n = vals.length, out = [], k = 2 / (p + 1), seed = 0, cnt = 0, prev = null, t;
+    for (t = 0; t < n; t++){
+      var v = vals[t];
+      if (v === null || v === undefined){ out.push(null); continue; }
+      if (prev === null){
+        seed += v; cnt++;
+        if (cnt === p){ prev = seed / p; out.push(prev); } else out.push(null);
+      } else { prev = v * k + prev * (1 - k); out.push(prev); }
+    }
+    return out;
+  }
+  function gmRsiWeb(closes, p){
+    var n = closes.length, out = [], i, d;
+    for (i = 0; i < n; i++) out.push(null);
+    if (n <= p) return out;
+    var g = 0, l = 0;
+    for (i = 1; i <= p; i++){ d = closes[i] - closes[i - 1]; if (d > 0) g += d; else l -= d; }
+    var ag = g / p, al = l / p;
+    function val(){ return al === 0 ? (ag === 0 ? 50 : 100) : 100 - 100 / (1 + ag / al); }
+    out[p] = val();
+    for (i = p + 1; i < n; i++){
+      d = closes[i] - closes[i - 1];
+      ag = (ag * (p - 1) + (d > 0 ? d : 0)) / p;
+      al = (al * (p - 1) + (d < 0 ? -d : 0)) / p;
+      out[i] = val();
+    }
+    return out;
+  }
+  function gmStdevPop(vals, p){
+    var n = vals.length, out = [], t, j;
+    for (t = 0; t < n; t++) out.push(null);
+    for (t = p - 1; t < n; t++){
+      var s = 0, ok = true;
+      for (j = t - p + 1; j <= t; j++){ if (vals[j] === null || vals[j] === undefined){ ok = false; break; } s += vals[j]; }
+      if (!ok) continue;
+      var m = s / p, v = 0;
+      for (j = t - p + 1; j <= t; j++) v += Math.pow(vals[j] - m, 2);
+      out[t] = Math.sqrt(v / p);
+    }
+    return out;
+  }
+  function gmRollHHLL(vals, p){
+    var n = vals.length, hh = [], ll = [], t, j;
+    for (t = 0; t < n; t++){ hh.push(null); ll.push(null); }
+    for (t = 0; t < n; t++){
+      var start = t - p + 1;
+      if (start < 0) continue;
+      var mx = -Infinity, mn = Infinity, ok = true;
+      for (j = start; j <= t; j++){
+        var v = vals[j];
+        if (v === null || v === undefined){ ok = false; break; }
+        if (v > mx) mx = v;
+        if (v < mn) mn = v;
+      }
+      if (ok){ hh[t] = mx; ll[t] = mn; }
+    }
+    return [hh, ll];
+  }
+  function gmHilbertPhase(P){
+    var n = P.length, t;
+    var Smooth = [], Det = [], Q1 = [], I1 = [], jI = [], jQ = [], I2 = [], Q2 = [], Re = [], Im = [], Period = [], Phase = [];
+    for (t = 0; t < n; t++){ Smooth.push(0); Det.push(0); Q1.push(0); I1.push(0); jI.push(0); jQ.push(0); I2.push(0); Q2.push(0); Re.push(0); Im.push(0); Period.push(0); Phase.push(0); }
+    function Lg(a, tt, k){ return tt - k >= 0 ? a[tt - k] : 0; }
+    for (t = 0; t < n; t++){
+      Smooth[t] = (4 * P[t] + 3 * Lg(P, t, 1) + 2 * Lg(P, t, 2) + Lg(P, t, 3)) / 10;
+      var f = 0.075 * (t > 0 ? Period[t - 1] : 0) + 0.54;
+      Det[t] = (0.0962 * Smooth[t] + 0.5769 * Lg(Smooth, t, 2) - 0.5769 * Lg(Smooth, t, 4) - 0.0962 * Lg(Smooth, t, 6)) * f;
+      Q1[t] = (0.0962 * Det[t] + 0.5769 * Lg(Det, t, 2) - 0.5769 * Lg(Det, t, 4) - 0.0962 * Lg(Det, t, 6)) * f;
+      I1[t] = Lg(Det, t, 3);
+      jI[t] = (0.0962 * I1[t] + 0.5769 * Lg(I1, t, 2) - 0.5769 * Lg(I1, t, 4) - 0.0962 * Lg(I1, t, 6)) * f;
+      jQ[t] = (0.0962 * Q1[t] + 0.5769 * Lg(Q1, t, 2) - 0.5769 * Lg(Q1, t, 4) - 0.0962 * Lg(Q1, t, 6)) * f;
+      var i2 = I1[t] - jQ[t], q2 = Q1[t] + jI[t];
+      i2 = 0.2 * i2 + 0.8 * (t > 0 ? I2[t - 1] : 0);
+      q2 = 0.2 * q2 + 0.8 * (t > 0 ? Q2[t - 1] : 0);
+      I2[t] = i2; Q2[t] = q2;
+      var re = i2 * (t > 0 ? I2[t - 1] : 0) + q2 * (t > 0 ? Q2[t - 1] : 0);
+      var im = i2 * (t > 0 ? Q2[t - 1] : 0) - q2 * (t > 0 ? I2[t - 1] : 0);
+      re = 0.2 * re + 0.8 * (t > 0 ? Re[t - 1] : 0);
+      im = 0.2 * im + 0.8 * (t > 0 ? Im[t - 1] : 0);
+      Re[t] = re; Im[t] = im;
+      var per = t > 0 ? Period[t - 1] : 0;
+      if (im !== 0 && re !== 0) per = 360 / (Math.atan(im / re) * 180 / Math.PI);
+      if (t > 0 && Period[t - 1] > 0){
+        if (per > 1.5 * Period[t - 1]) per = 1.5 * Period[t - 1];
+        if (per < 0.67 * Period[t - 1]) per = 0.67 * Period[t - 1];
+      }
+      if (per < 6) per = 6;
+      if (per > 50) per = 50;
+      Period[t] = per;
+      Phase[t] = I1[t] !== 0 ? Math.atan(Q1[t] / I1[t]) * 180 / Math.PI : (t > 0 ? Phase[t - 1] : 0);
+    }
+    return Phase;
+  }
+  function gmSuperSmoother(src, P){
+    var n = src.length, a = Math.exp(-1.414 * Math.PI / P), b = 2 * a * Math.cos(1.414 * Math.PI / P);
+    var c2 = b, c3 = -a * a, c1 = 1 - c2 - c3, out = [], t;
+    for (t = 0; t < n; t++){
+      var s0 = src[t], s1 = t > 0 ? src[t - 1] : src[t];
+      var f1 = (t > 0 && out[t - 1] !== null && out[t - 1] !== undefined) ? out[t - 1] : s0;
+      var f2 = (t > 1 && out[t - 2] !== null && out[t - 2] !== undefined) ? out[t - 2] : s0;
+      out.push(c1 * (s0 + s1) / 2 + c2 * f1 + c3 * f2);
+    }
+    return out;
+  }
+  function gmLastClosed(tsArr, dur, endTs){
+    var lo = 0, hi = tsArr.length - 1, ans = -1;
+    while (lo <= hi){
+      var mid = (lo + hi) >> 1;
+      if (tsArr[mid] + dur <= endTs){ ans = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    return ans;
+  }
+  function gmCrossUp(a, b, t){
+    if (t < 1) return false;
+    if (a[t] == null || b[t] == null || a[t - 1] == null || b[t - 1] == null) return false;
+    return a[t - 1] <= b[t - 1] && a[t] > b[t];
+  }
+  function gmCrossDn(a, b, t){
+    if (t < 1) return false;
+    if (a[t] == null || b[t] == null || a[t - 1] == null || b[t - 1] == null) return false;
+    return a[t - 1] >= b[t - 1] && a[t] < b[t];
+  }
+
+    function haWickVeto(long, candles){
+    if (!candles || !candles.length) return false;
+    var prevO = null, prevC = null, o = 0, h = 0, l = 0, c = 0;
+    for (var i = 0; i < candles.length; i++){
+      var cd = candles[i];
+      var haC = (cd.open + cd.high + cd.low + cd.close) / 4;
+      var haO = (i === 0) ? cd.open : (prevO + prevC) / 2;
+      var haH = Math.max(cd.high, haO, haC);
+      var haL = Math.min(cd.low, haO, haC);
+      o = haO; h = haH; l = haL; c = haC;
+      prevO = haO; prevC = haC;
+    }
+    var body = Math.abs(c - o);
+    if (long) return (Math.min(o, c) - l) > body;
+    return (h - Math.max(o, c)) > body;
+  }
+
+  function c3RsiSeries(closes, p){
+    var n = closes.length, out = [], i, d, g = 0, l = 0;
+    for (i = 0; i < n; i++) out.push(null);
+    if (n <= p) return out;
+    for (i = 1; i <= p; i++){ d = closes[i] - closes[i - 1]; if (d > 0) g += d; else l -= d; }
+    g /= p; l /= p;
+    out[p] = (l === 0) ? 100 : 100 - 100 / (1 + g / l);
+    for (i = p + 1; i < n; i++){
+      d = closes[i] - closes[i - 1];
+      g = (g * (p - 1) + (d > 0 ? d : 0)) / p;
+      l = (l * (p - 1) + (d < 0 ? -d : 0)) / p;
+      out[i] = (l === 0) ? 100 : 100 - 100 / (1 + g / l);
+    }
+    return out;
+  }
+
+  function c3EmaArr(vals, p){
+    var out = [], i, s = 0;
+    for (i = 0; i < vals.length; i++) out.push(null);
+    if (vals.length < p) return out;
+    for (i = 0; i < p; i++) s += vals[i];
+    out[p - 1] = s / p;
+    var k = 2 / (p + 1);
+    for (i = p; i < vals.length; i++) out[i] = vals[i] * k + out[i - 1] * (1 - k);
+    return out;
+  }
+
+  function c3WilderArr(vals, p){
+    var out = [], i, s = 0;
+    for (i = 0; i < vals.length; i++) out.push(null);
+    if (vals.length < p) return out;
+    for (i = 0; i < p; i++) s += vals[i];
+    out[p - 1] = s / p;
+    for (i = p; i < vals.length; i++) out[i] = out[i - 1] + (vals[i] - out[i - 1]) / p;
+    return out;
+  }
+
+  function c3SupertrendDir(H, L, C, mult){
+    var n = C.length, i;
+    var TR = [];
+    for (i = 0; i < n; i++) TR.push(0);
+    for (i = 1; i < n; i++) TR[i] = Math.max(H[i] - L[i], Math.abs(H[i] - C[i - 1]), Math.abs(L[i] - C[i - 1]));
+    var atr = c3WilderArr(TR, 10);
+    var ST = [];
+    for (i = 0; i < n; i++) ST.push(null);
+    var fUp = null, fDn = null, dir = 1;
+    for (i = 0; i < n; i++){
+      if (atr[i] === null) continue;
+      var src = (H[i] + L[i] + C[i]) / 3;
+      var bUp = src + mult * atr[i], bDn = src - mult * atr[i];
+      if (fUp === null){ fUp = bUp; fDn = bDn; dir = (C[i] >= src) ? 1 : -1; }
+      else {
+        fUp = (bUp < fUp || C[i - 1] > fUp) ? bUp : fUp;
+        fDn = (bDn > fDn || C[i - 1] < fDn) ? bDn : fDn;
+        if (dir === 1 && C[i] < fDn) dir = -1;
+        else if (dir === -1 && C[i] > fUp) dir = 1;
+      }
+      ST[i] = dir;
+    }
+    return ST;
+  }
+
+  function c3AroonOscEma25(H, L){
+    var n = H.length, t, j;
+    var osc = [];
+    for (t = 0; t < n; t++) osc.push(null);
+    for (t = 28; t < n; t++){
+      var iH = t, iL = t;
+      for (j = t - 28; j <= t; j++){
+        if (H[j] >= H[iH]) iH = j;
+        if (L[j] <= L[iL]) iL = j;
+      }
+      osc[t] = 100 * (((28 - (t - iH)) - (28 - (t - iL))) / 28);
+    }
+    var oscE = [];
+    for (t = 0; t < n; t++) oscE.push(null);
+    var idxs = [];
+    for (t = 0; t < n; t++) if (osc[t] !== null) idxs.push(t);
+    if (idxs.length >= 25){
+      var e = 0;
+      for (j = 0; j < 25; j++) e += osc[idxs[j]];
+      e /= 25;
+      oscE[idxs[24]] = e;
+      var kk = 2 / 26;
+      for (j = 25; j < idxs.length; j++){ e = osc[idxs[j]] * kk + e * (1 - kk); oscE[idxs[j]] = e; }
+    }
+    return oscE;
+  }
+
+  function c3RangeTables(vals, wantMax){
+    var n = vals.length;
+    if (!n) return [];
+    var tables = [vals.slice()], step = 1;
+    while (step * 2 <= n){
+      var prev = tables[tables.length - 1], size = n - step * 2 + 1, cur = [], i;
+      for (i = 0; i < size; i++){
+        var a = prev[i], b = prev[i + step];
+        cur.push(((a >= b) === wantMax) ? a : b);
+      }
+      tables.push(cur);
+      step *= 2;
+    }
+    return tables;
+  }
+
+  function c3RangeQuery(tables, lo, hi, wantMax){
+    var len = hi - lo + 1, k = 0;
+    while ((1 << (k + 1)) <= len) k++;
+    var span = 1 << k;
+    var a = tables[k][lo], b = tables[k][hi - span + 1];
+    return ((a >= b) === wantMax) ? a : b;
+  }
+
+  function c3FirstBreach(tables, n, start, threshold, wantBelow){
+    if (start >= n) return null;
+    var whole = c3RangeQuery(tables, start, n - 1, !wantBelow);
+    if (wantBelow){ if (whole >= threshold) return null; }
+    else if (whole <= threshold) return null;
+    var lo = start, hi = n - 1;
+    while (lo < hi){
+      var mid = (lo + hi) >> 1;
+      var v = c3RangeQuery(tables, start, mid, !wantBelow);
+      var breached = wantBelow ? (v < threshold) : (v > threshold);
+      if (breached) hi = mid; else lo = mid + 1;
+    }
+    return lo;
+  }
+
+  function c3CprLevels(guard){
+    if (!guard || !guard.m15 || !guard.ts15 || !guard.ts || !guard.ts.length) return null;
+    if (guard.ts15.length !== guard.m15.length) return null;
+    var days = {}, order = [], i, dk;
+    for (i = 0; i < guard.m15.length; i++){
+      var r = guard.m15[i];
+      dk = Math.floor(guard.ts15[i] / 86400);
+      var d0 = days[dk];
+      if (!d0){ days[dk] = { h: r.high, l: r.low, c: r.close }; order.push(dk); }
+      else {
+        if (r.high > d0.h) d0.h = r.high;
+        if (r.low < d0.l) d0.l = r.low;
+        d0.c = r.close;
+      }
+    }
+    var sigDay = Math.floor(guard.ts[guard.ts.length - 1] / 86400), prev = null;
+    for (i = 0; i < order.length; i++){
+      if (order[i] < sigDay) prev = order[i]; else break;
+    }
+    if (prev === null) return null;
+    var a = days[prev];
+    var P = (a.h + a.l + a.c) / 3, TC = (a.h + a.l) / 2;
+    return { R1: 2 * P - a.l, R2: P + (a.h - a.l), S1: 2 * P - a.h,
+             S2: P - (a.h - a.l), TC: TC, BC: 2 * P - TC };
+  }
+
+  function c3WallBlocked(O, H, L, C, tabH, tabL, idx, isLong, entry, atr){
+    var n = C.length, j, b, x;
+    var TR = [];
+    for (j = 0; j < n; j++) TR.push(0);
+    for (j = 1; j < n; j++) TR[j] = Math.max(H[j] - L[j], Math.abs(H[j] - C[j - 1]), Math.abs(L[j] - C[j - 1]));
+    var atr14 = [];
+    for (j = 0; j < n; j++) atr14.push(null);
+    if (n > 14){
+      var a = 0;
+      for (j = 1; j < 15; j++) a += TR[j];
+      a /= 14;
+      atr14[14] = a;
+      for (j = 15; j < n; j++){ a = (a * 13 + TR[j]) / 14; atr14[j] = a; }
+    }
+    var confAt = {};
+    for (j = 4; j < n - 4; j++){
+      var isH = true, isL = true;
+      for (x = j - 4; x <= j + 4; x++){
+        if (x === j) continue;
+        if (H[x] >= H[j]) isH = false;
+        if (L[x] <= L[j]) isL = false;
+      }
+      if (isH || isL) confAt[j + 4] = [j, isH, isL];
+    }
+    var pools = [];
+    for (b = 0; b < n; b++){
+      var cf = confAt[b];
+      if (cf && atr14[cf[0]] !== null){
+        var sj = cf[0], sa = atr14[sj];
+        if (cf[1]) pools.push([true, H[sj], H[sj] + 0.75 * sa, 1.6, b, H[sj]]);
+        if (cf[2]) pools.push([false, L[sj] - 0.75 * sa, L[sj], 1.6, b, L[sj]]);
+      }
+      if (atr14[b] !== null){
+        var mx = Math.max(O[b], C[b]), mn = Math.min(O[b], C[b]);
+        if (H[b] - mx >= 0.45 * atr14[b]) pools.push([true, mx, H[b], 0.5, b, mx]);
+        if (mn - L[b] >= 0.45 * atr14[b]) pools.push([false, L[b], mn, 0.5, b, mn]);
+      }
+    }
+    var loI = Math.max(0, idx - 299), rLo = Infinity, rHi = -Infinity;
+    for (j = loI; j <= idx; j++){
+      if (L[j] < rLo) rLo = L[j];
+      if (H[j] > rHi) rHi = H[j];
+    }
+    if (!(rHi > rLo)) return false;
+    var NB = 40, w = (rHi - rLo) / NB, rowsW = [], pi, r2;
+    for (j = 0; j < NB; j++) rowsW.push(0);
+    for (pi = 0; pi < pools.length; pi++){
+      var p = pools[pi];
+      if (p[4] > idx) break;
+      if (!(p[2] > p[1])) continue;
+      var pen = 0;
+      if (idx > p[4]){
+        var track = p[0] ? Math.max(p[5], c3RangeQuery(tabH, p[4] + 1, idx, true))
+                         : Math.min(p[5], c3RangeQuery(tabL, p[4] + 1, idx, false));
+        pen = p[0] ? (track - p[1]) / (p[2] - p[1]) : (p[2] - track) / (p[2] - p[1]);
+        pen = Math.min(1, Math.max(0, pen));
+      }
+      if (pen >= 1) continue;
+      var eff = p[3] * Math.pow(0.5, (idx - p[4]) / 300) * (1 - pen);
+      if (!(eff > 0)) continue;
+      var i0 = Math.max(0, Math.min(NB - 1, Math.trunc((p[1] - rLo) / w)));
+      var i1 = Math.max(0, Math.min(NB - 1, Math.trunc((p[2] - rLo) / w)));
+      for (r2 = i0; r2 <= i1; r2++) rowsW[r2] += eff;
+    }
+    var wall = null;
+    for (var r3 = 0; r3 < NB; r3++){
+      var c = rLo + (r3 + 0.5) * w;
+      if (isLong){
+        if (c > entry + 0.3 * atr && (wall === null || rowsW[r3] > wall[1])) wall = [c, rowsW[r3]];
+      } else {
+        if (c < entry - 0.3 * atr && (wall === null || rowsW[r3] > wall[1])) wall = [c, rowsW[r3]];
+      }
+    }
+    return !!(wall && wall[1] > 0 && Math.abs(wall[0] - entry) / atr < 1.0);
+  }
+
+  function c3HvnBlocked(H, L, idx, isLong, entry, atr){
+    var frm = Math.max(0, idx - 287), lo = Infinity, hi = -Infinity, j, b;
+    for (j = frm; j <= idx; j++){
+      if (L[j] < lo) lo = L[j];
+      if (H[j] > hi) hi = H[j];
+    }
+    if (!(hi > lo)) return false;
+    var NB = 30, w = (hi - lo) / NB, bins = [];
+    for (j = 0; j < NB; j++) bins.push(0);
+    for (j = frm; j <= idx; j++){
+      var b0 = Math.min(NB - 1, Math.trunc((L[j] - lo) / w));
+      var b1 = Math.min(NB - 1, Math.trunc((H[j] - lo) / w));
+      for (b = b0; b <= b1; b++) bins[b] += 1;
+    }
+    var poc = 0;
+    for (b = 1; b < NB; b++) if (bins[b] > bins[poc]) poc = b;
+    var thr = 0.05 * bins[poc];
+    var nearAbove = Infinity, nearBelow = -Infinity;
+    for (b = 1; b < NB - 1; b++){
+      if (b === poc) continue;
+      if (bins[b] > bins[b - 1] && bins[b] > bins[b + 1] && bins[b] >= thr){
+        var price = lo + (b + 0.5) * w;
+        if (price > entry && price < nearAbove) nearAbove = price;
+        if (price < entry && price > nearBelow) nearBelow = price;
+      }
+    }
+    return isLong ? (nearAbove - entry < 1.0 * atr) : (entry - nearBelow < 1.0 * atr);
+  }
+
+  // ---- batch machinery (ports of scalping-watch/batch_shadow.py) ----
+  function gmPivotBars(H, L){
+    var n = H.length, pH = [], pL = [], j;
+    for (j = 2; j < n - 2; j++){
+      if (H[j] > H[j - 1] && H[j] > H[j - 2] && H[j] > H[j + 1] && H[j] > H[j + 2]) pH.push(j);
+      if (L[j] < L[j - 1] && L[j] < L[j - 2] && L[j] < L[j + 1] && L[j] < L[j + 2]) pL.push(j);
+    }
+    return [pH, pL];
+  }
+  function gmAltSeq(H, L){
+    var pv = gmPivotBars(H, L), lst = [], i;
+    for (i = 0; i < pv[0].length; i++) lst.push({ bar: pv[0][i], type: "H", price: H[pv[0][i]] });
+    for (i = 0; i < pv[1].length; i++) lst.push({ bar: pv[1][i], type: "L", price: L[pv[1][i]] });
+    lst.sort(function(a, b){ return (a.bar - b.bar) || ((a.type === "H" ? 0 : 1) - (b.type === "H" ? 0 : 1)); });
+    var out = [];
+    for (i = 0; i < lst.length; i++){
+      var p = lst[i];
+      if (out.length && out[out.length - 1].type === p.type){
+        var last = out[out.length - 1];
+        if ((p.type === "H" && p.price > last.price) || (p.type === "L" && p.price < last.price)) out[out.length - 1] = p;
+      } else out.push(p);
+    }
+    return out;
+  }
+  function gmMajorSwings(seq, atr){
+    var out = [], k;
+    for (k = 0; k + 1 < seq.length; k++){
+      var A = seq[k], B = seq[k + 1];
+      var a = B.bar < atr.length ? atr[B.bar] : null;
+      var rng = Math.abs(B.price - A.price);
+      if (a === null || !(a > 0) || rng < 4 * a) continue;
+      out.push({ aBar: A.bar, aPrice: A.price, bBar: B.bar, bPrice: B.price,
+                 up: B.price > A.price, range: rng, confirm: B.bar + 2 });
+    }
+    return out;
+  }
+  function gmSwingAt(swings, refBar){
+    var ans = null;
+    for (var i = 0; i < swings.length; i++){
+      if (swings[i].confirm <= refBar) ans = swings[i]; else break;
+    }
+    return ans;
+  }
+  function gmDayFib(ts, H, L, C){
+    var days = {}, order = [], i;
+    for (i = 0; i < ts.length; i++){
+      var dk = Math.floor(ts[i] / 86400);
+      var d = days[dk];
+      if (!d){ days[dk] = { h: H[i], l: L[i], c: C[i] }; order.push(dk); }
+      else { if (H[i] > d.h) d.h = H[i]; if (L[i] < d.l) d.l = L[i]; d.c = C[i]; }
+    }
+    order.sort(function(a, b){ return a - b; });
+    var out = {};
+    for (i = 1; i < order.length; i++){
+      var prev = days[order[i - 1]];
+      var P = (prev.h + prev.l + prev.c) / 3, R = prev.h - prev.l;
+      out[order[i]] = [[P + 0.382 * R, P + 0.618 * R, P + R],
+                       [P - 0.382 * R, P - 0.618 * R, P - R]];
+    }
+    return out;
+  }
+  function gmPsarDir(H, L, C){
+    var n = C.length, dr = [], i;
+    for (i = 0; i < n; i++) dr.push(null);
+    if (n < 2) return dr;
+    var isLong = C[1] >= C[0];
+    var ep = isLong ? Math.max(H[0], H[1]) : Math.min(L[0], L[1]);
+    var s = isLong ? Math.min(L[0], L[1]) : Math.max(H[0], H[1]);
+    var af = 0.02;
+    dr[1] = isLong ? 1 : -1;
+    for (i = 2; i < n; i++){
+      var proj = s + af * (ep - s);
+      if (isLong) proj = Math.min(proj, L[i - 1], L[i - 2]);
+      else proj = Math.max(proj, H[i - 1], H[i - 2]);
+      if (isLong && L[i] < proj){ isLong = false; s = ep; ep = L[i]; af = 0.02; }
+      else if (!isLong && H[i] > proj){ isLong = true; s = ep; ep = H[i]; af = 0.02; }
+      else {
+        s = proj;
+        if (isLong && H[i] > ep){ ep = H[i]; af = Math.min(af + 0.02, 0.2); }
+        if (!isLong && L[i] < ep){ ep = L[i]; af = Math.min(af + 0.02, 0.2); }
+      }
+      dr[i] = isLong ? 1 : -1;
+    }
+    return dr;
+  }
+  function gmCci(H, L, C, p){
+    var n = C.length, out = [], tp = [], t, j;
+    for (t = 0; t < n; t++){ out.push(null); tp.push((H[t] + L[t] + C[t]) / 3); }
+    for (t = p - 1; t < n; t++){
+      var sma = 0;
+      for (j = t - p + 1; j <= t; j++) sma += tp[j];
+      sma /= p;
+      var md = 0;
+      for (j = t - p + 1; j <= t; j++) md += Math.abs(tp[j] - sma);
+      md /= p;
+      out[t] = md === 0 ? 0 : (tp[t] - sma) / (0.015 * md);
+    }
+    return out;
+  }
+  function gmMomentum(C, p){
+    var n = C.length, out = [], t;
+    for (t = 0; t < n; t++) out.push(t >= p ? C[t] - C[t - p] : null);
+    return out;
+  }
+  function gmAcSeries(H, L){
+    var n = H.length, mp = [], i;
+    for (i = 0; i < n; i++) mp.push((H[i] + L[i]) / 2);
+    var a5 = gmSmaNull(mp, 5), a34 = gmSmaNull(mp, 34), ao = [];
+    for (i = 0; i < n; i++) ao.push(a5[i] !== null && a34[i] !== null ? a5[i] - a34[i] : null);
+    var aoS = gmSmaNull(ao, 5), ac = [];
+    for (i = 0; i < n; i++) ac.push(ao[i] !== null && aoS[i] !== null ? ao[i] - aoS[i] : null);
+    return ac;
+  }
+  function gmBatch1Events(psarDir, cci, mom, ac){
+    var ev = { E1_AC: [], E2_PSAR: [], E3_CCIREV: [], E4_MOM: [] };
+    var n = psarDir.length, t;
+    for (t = 1; t < n; t++){
+      if (psarDir[t] !== null && psarDir[t - 1] !== null && psarDir[t] !== psarDir[t - 1])
+        ev.E2_PSAR.push({ bar: t, long: psarDir[t] > 0 });
+      var m = mom[t], mp = mom[t - 1];
+      if (m !== null && mp !== null){
+        if (mp < 0 && m >= 0) ev.E4_MOM.push({ bar: t, long: true });
+        else if (mp > 0 && m <= 0) ev.E4_MOM.push({ bar: t, long: false });
+      }
+      var x = cci[t], xp = cci[t - 1];
+      if (x !== null && xp !== null){
+        if (xp < -100 && x >= -100) ev.E3_CCIREV.push({ bar: t, long: true });
+        else if (xp > 100 && x <= 100) ev.E3_CCIREV.push({ bar: t, long: false });
+      }
+      var y = ac[t], yp = ac[t - 1];
+      if (y !== null && yp !== null){
+        if (yp <= 0 && y > 0) ev.E1_AC.push({ bar: t, long: true });
+        else if (yp >= 0 && y < 0) ev.E1_AC.push({ bar: t, long: false });
+      }
+    }
+    return ev;
+  }
+  function gmFib618Events(rows, swings){
+    // rows = {H, L, C}; swings from gmMajorSwings on the same series
+    var H = rows.H, L = rows.L, C = rows.C, n = C.length, events = [], k, j;
+    for (k = 0; k < swings.length; k++){
+      var sw = swings[k];
+      var watchEnd = k + 1 < swings.length ? Math.min(swings[k + 1].confirm - 1, n - 1) : n - 1;
+      var l618 = sw.up ? sw.bPrice - 0.618 * sw.range : sw.bPrice + 0.618 * sw.range;
+      for (j = sw.confirm; j <= watchEnd; j++){
+        var killed = sw.up ? C[j] < sw.aPrice : C[j] > sw.aPrice;
+        if (killed) break;
+        if (L[j] <= l618 && l618 <= H[j]){ events.push({ bar: j, long: sw.up }); break; }
+      }
+    }
+    return events;
+  }
+  function gmGannEvents(C, atr, seq){
+    var n = C.length, events = [], k, j;
+    for (k = 0; k < seq.length; k++){
+      var p = seq[k];
+      var a = p.bar < atr.length ? atr[p.bar] : null;
+      if (a === null || !(a > 0)) continue;
+      var start = p.bar + 2;
+      var end = k + 1 < seq.length ? seq[k + 1].bar + 2 : n;
+      var isLow = p.type === "L";
+      function line(jj){ return p.price + (isLow ? a * (jj - p.bar) : -a * (jj - p.bar)); }
+      for (j = Math.max(start, 1); j < end; j++){
+        var cj = C[j], cp = C[j - 1];
+        if (isLow && cp <= line(j - 1) && cj > line(j)){ events.push({ bar: j, long: true }); break; }
+        if (!isLow && cp >= line(j - 1) && cj < line(j)){ events.push({ bar: j, long: false }); break; }
+      }
+    }
+    events.sort(function(x, y){ return x.bar - y.bar; });
+    return events;
+  }
+  var GM_REVERSAL_CLASS = { hammer: 1, inverted_hammer: 1, hanging_man: 1,
+    shooting_star: 1, piercing_line: 1, dark_cloud: 1, engulfing_bull: 1,
+    engulfing_bear: 1, harami_bull: 1, harami_bear: 1, tweezers_top: 1,
+    tweezers_bottom: 1, morning_star: 1, evening_star: 1,
+    gravestone_doji: 1, dragonfly_doji: 1, belt_hold_bull: 1,
+    belt_hold_bear: 1, doji: 1, long_legged_doji: 1, spinning_top: 1 };
+  function gmDetectCandles(O, H, L, C, atr){
+    var n = C.length, byBar = {}, b;
+    function push(bb, name, d){
+      if (!byBar[bb]) byBar[bb] = [];
+      byBar[bb].push([name, d]);
+    }
+    function driftBefore(f){
+      if (f - 4 < 0) return null;
+      var d = C[f - 1] - C[f - 4];
+      return d > 0 ? 1 : (d < 0 ? -1 : 0);
+    }
+    function geom(i){
+      var R = H[i] - L[i];
+      if (R <= 0) return null;
+      return { R: R, body: Math.abs(C[i] - O[i]),
+               UW: H[i] - Math.max(O[i], C[i]), LW: Math.min(O[i], C[i]) - L[i] };
+    }
+    for (b = 0; b < n; b++){
+      var g = geom(b);
+      if (g === null) continue;
+      var R = g.R, body = g.body, UW = g.UW, LW = g.LW;
+      var bull = C[b] > O[b], bear = C[b] < O[b];
+      if (body <= 0.10 * R){
+        push(b, "doji", null);
+        if (UW >= 0.35 * R && LW >= 0.35 * R) push(b, "long_legged_doji", null);
+        var dr0 = driftBefore(b);
+        if (UW >= 0.70 * R && LW <= 0.10 * R && dr0 === 1) push(b, "gravestone_doji", "short");
+        if (LW >= 0.70 * R && UW <= 0.10 * R && dr0 === -1) push(b, "dragonfly_doji", "long");
+      }
+      if (0.10 * R < body && body <= 0.30 * R && UW >= 0.25 * R && LW >= 0.25 * R)
+        push(b, "spinning_top", null);
+      var drb = driftBefore(b);
+      if (0.05 * R <= body && body <= 0.35 * R){
+        if (LW >= 2 * body && UW <= body){
+          if (drb === -1) push(b, "hammer", "long");
+          else if (drb === 1) push(b, "hanging_man", "short");
+        }
+        if (UW >= 2 * body && LW <= body){
+          if (drb === -1) push(b, "inverted_hammer", "long");
+          else if (drb === 1) push(b, "shooting_star", "short");
+        }
+      }
+      if (body <= 0.35 * R){
+        if (LW >= 0.60 * R && LW >= 2 * body && UW <= 0.5 * body) push(b, "pin_bar", "long");
+        if (UW >= 0.60 * R && UW >= 2 * body && LW <= 0.5 * body) push(b, "pin_bar", "short");
+      }
+      if (body >= 0.90 * R){
+        if (bull) push(b, "marubozu_bull", "long");
+        else if (bear) push(b, "marubozu_bear", "short");
+      }
+      if (bull && LW <= 0.05 * R && body >= 0.70 * R && drb === -1) push(b, "belt_hold_bull", "long");
+      if (bear && UW <= 0.05 * R && body >= 0.70 * R && drb === 1) push(b, "belt_hold_bear", "short");
+      if (b >= 1){
+        if (H[b] <= H[b - 1] && L[b] >= L[b - 1]) push(b, "inside_bar", null);
+        if (H[b] >= H[b - 1] && L[b] <= L[b - 1] && (H[b] > H[b - 1] || L[b] < L[b - 1]) && C[b] !== O[b])
+          push(b, "outside_bar", bull ? "long" : "short");
+        var g1 = geom(b - 1);
+        if (g1 !== null){
+          var dr = driftBefore(b - 1);
+          var b1bear = C[b - 1] < O[b - 1], b1bull = C[b - 1] > O[b - 1];
+          var mid1 = (O[b - 1] + C[b - 1]) / 2;
+          if (b1bear && bull && O[b] <= C[b - 1] && C[b] >= O[b - 1] && (O[b] < C[b - 1] || C[b] > O[b - 1]) && dr === -1)
+            push(b, "engulfing_bull", "long");
+          if (b1bull && bear && O[b] >= C[b - 1] && C[b] <= O[b - 1] && (O[b] > C[b - 1] || C[b] < O[b - 1]) && dr === 1)
+            push(b, "engulfing_bear", "short");
+          if (b1bear && g1.body >= 0.5 * g1.R && bull && O[b] < C[b - 1] && C[b] > mid1 && C[b] < O[b - 1] && dr === -1)
+            push(b, "piercing_line", "long");
+          if (b1bull && g1.body >= 0.5 * g1.R && bear && O[b] > C[b - 1] && C[b] < mid1 && C[b] > O[b - 1] && dr === 1)
+            push(b, "dark_cloud", "short");
+          if (b1bear && g1.body >= 0.5 * g1.R && bull && O[b] >= C[b - 1] && C[b] <= O[b - 1] && body < g1.body && dr === -1)
+            push(b, "harami_bull", "long");
+          if (b1bull && g1.body >= 0.5 * g1.R && bear && O[b] <= C[b - 1] && C[b] >= O[b - 1] && body < g1.body && dr === 1)
+            push(b, "harami_bear", "short");
+          var a = atr[b];
+          if (a){
+            if (Math.abs(H[b] - H[b - 1]) <= 0.10 * a && dr === 1) push(b, "tweezers_top", "short");
+            if (Math.abs(L[b] - L[b - 1]) <= 0.10 * a && dr === -1) push(b, "tweezers_bottom", "long");
+          }
+        }
+      }
+      if (b >= 2){
+        var gA = geom(b - 2), gB = geom(b - 1);
+        if (gA !== null && gB !== null){
+          var dr3 = driftBefore(b - 2);
+          var midA = (O[b - 2] + C[b - 2]) / 2;
+          var bAbear = C[b - 2] < O[b - 2], bAbull = C[b - 2] > O[b - 2];
+          if (bAbear && gA.body >= 0.5 * gA.R && gB.body <= 0.30 * gB.R &&
+              Math.max(O[b - 1], C[b - 1]) <= C[b - 2] && bull && body >= 0.5 * R && C[b] > midA && dr3 === -1)
+            push(b, "morning_star", "long");
+          if (bAbull && gA.body >= 0.5 * gA.R && gB.body <= 0.30 * gB.R &&
+              Math.min(O[b - 1], C[b - 1]) >= C[b - 2] && bear && body >= 0.5 * R && C[b] < midA && dr3 === 1)
+            push(b, "evening_star", "short");
+          var idxs = [b - 2, b - 1, b];
+          var allBull = idxs.every(function(i){ return C[i] > O[i]; });
+          var allBear = idxs.every(function(i){ return C[i] < O[i]; });
+          var bodiesOk = true, uwOk = true, lwOk = true, opensOk = true, closesOk = true;
+          for (var kk = 0; kk < 3; kk++){
+            var i2 = idxs[kk], gi = geom(i2);
+            if (gi === null || gi.body < 0.5 * gi.R){ bodiesOk = false; break; }
+            if (gi.UW > 0.25 * gi.R) uwOk = false;
+            if (gi.LW > 0.25 * gi.R) lwOk = false;
+            if (kk > 0){
+              var pp = idxs[kk - 1];
+              if (allBull){
+                if (!(O[i2] >= O[pp] && O[i2] <= C[pp])) opensOk = false;
+                if (!(C[i2] > C[pp])) closesOk = false;
+              }
+              if (allBear){
+                if (!(O[i2] <= O[pp] && O[i2] >= C[pp])) opensOk = false;
+                if (!(C[i2] < C[pp])) closesOk = false;
+              }
+            }
+          }
+          if (allBull && bodiesOk && uwOk && opensOk && closesOk) push(b, "three_white_soldiers", "long");
+          if (allBear && bodiesOk && lwOk && opensOk && closesOk) push(b, "three_black_crows", "short");
+        }
+      }
+    }
+    return byBar;
+  }
+  function gmFirstBarOf(name, b){
+    if (["tweezers_top", "tweezers_bottom", "harami_bull", "harami_bear",
+         "engulfing_bull", "engulfing_bear", "piercing_line", "dark_cloud"].indexOf(name) >= 0) return b - 1;
+    if (["morning_star", "evening_star", "three_white_soldiers", "three_black_crows"].indexOf(name) >= 0) return b - 2;
+    return b;
+  }
+  function gmExtremeCheck(H, L, pivSet, d, b, firstBar){
+    var p;
+    for (p = b - 5; p < b - 1; p++) if (pivSet[p]) return true;
+    if (firstBar >= 20){
+      var i, span, prior;
+      if (d === "long"){
+        span = Infinity; prior = Infinity;
+        for (i = firstBar; i <= b; i++) span = Math.min(span, L[i]);
+        for (i = firstBar - 20; i < firstBar; i++) prior = Math.min(prior, L[i]);
+        return span <= prior;
+      }
+      span = -Infinity; prior = -Infinity;
+      for (i = firstBar; i <= b; i++) span = Math.max(span, H[i]);
+      for (i = firstBar - 20; i < firstBar; i++) prior = Math.max(prior, H[i]);
+      return span >= prior;
+    }
+    return false;
+  }
+  function gmCandleEvents(H, L, atr, byBar, pHset, pLset, name){
+    var events = [], bars = Object.keys(byBar).map(Number).sort(function(a, b){ return a - b; }), bi;
+    for (bi = 0; bi < bars.length; bi++){
+      var b = bars[bi], evs = byBar[b], ev = null, ei;
+      for (ei = 0; ei < evs.length; ei++) if (evs[ei][0] === name){ ev = evs[ei]; break; }
+      if (ev === null) continue;
+      var d = ev[1], a = atr[b];
+      if (!a) continue;
+      if (GM_REVERSAL_CLASS[name]){
+        var piv = d === "long" ? pLset : pHset;
+        if (!gmExtremeCheck(H, L, piv, d, b, gmFirstBarOf(name, b))) continue;
+      }
+      events.push({ bar: b, long: d === "long" });
+    }
+    return events;
+  }
+
+  function gmBuildForkAt(H, L){
+    var seq = gmAltSeq(H, L), n = H.length, forks = [], byFrom = {}, k;
+    for (k = 0; k + 2 < seq.length; k++){
+      var A = seq[k], B = seq[k + 1], Cc = seq[k + 2];
+      var mBar = (B.bar + Cc.bar) / 2, mPrice = (B.price + Cc.price) / 2;
+      if (mBar === A.bar) continue;
+      var m = (mPrice - A.price) / (mBar - A.bar);
+      var hiP = B.price >= Cc.price ? B : Cc, loP = B.price >= Cc.price ? Cc : B;
+      var activeFrom = Cc.bar + 2;
+      forks.push({ A: A, hiP: hiP, loP: loP, m: m, activeFrom: activeFrom,
+                   expires: Math.min(n, activeFrom + 150) });
+    }
+    for (k = 0; k < forks.length; k++) byFrom[forks[k].activeFrom] = forks[k];
+    var out = [], cur = null, j;
+    for (j = 0; j < n; j++){
+      var f = byFrom[j];
+      if (f) cur = f;
+      if (cur !== null && j >= cur.expires) cur = null;
+      out.push(cur);
+    }
+    // line evaluators bound per fork object
+    for (k = 0; k < forks.length; k++){
+      (function(fk){
+        fk.med = function(jj){ return fk.A.price + fk.m * (jj - fk.A.bar); };
+        fk.up = function(jj){ return fk.hiP.price + fk.m * (jj - fk.hiP.bar); };
+        fk.lo = function(jj){ return fk.loP.price + fk.m * (jj - fk.loP.bar); };
+      })(forks[k]);
+    }
+    return out;
+  }
+  function gmWin5(s){
+    var ups = s.filter(function(p){ return p.type === "H"; });
+    var dns = s.filter(function(p){ return p.type === "L"; });
+    var uF = ups[0], uL = ups[ups.length - 1], dF = dns[0], dL = dns[dns.length - 1];
+    return { ups: ups, dns: dns,
+             slopeU: (uL.price - uF.price) / (uL.bar - uF.bar),
+             slopeL: (dL.price - dF.price) / (dL.bar - dF.bar),
+             gapStart: uF.price - dF.price, gapE: uL.price - dL.price,
+             lastBar: s[s.length - 1].bar, firstBar: s[0].bar };
+  }
+  function gmScanLines(C, start, exp, lineU, lineL, push){
+    var n = C.length, c;
+    for (c = start; c < Math.min(n, exp); c++){
+      var u = lineU(c), l = lineL(c);
+      if (!(u > l)) break;
+      if (C[c] > u){ push(c, "long"); return; }
+      if (C[c] < l){ push(c, "short"); return; }
+    }
+  }
+  function gmB4Events(C, atr, seq, ptype){
+    var n = C.length, raw = [], seen = {}, k;
+    function push(bar, d){
+      var key = ptype + "|" + bar;
+      if (seen[key]) return;
+      seen[key] = 1;
+      raw.push({ bar: bar, long: d === "long" });
+    }
+    if (ptype === "asc_triangle"){
+      for (k = 0; k + 4 < seq.length; k++){
+        var s = seq.slice(k, k + 5), w = gmWin5(s);
+        var at = atr[w.lastBar];
+        if (at === null || at === undefined) continue;
+        var uF = w.ups[0], dF = w.dns[0];
+        (function(w2, uF2, dF2){
+          var lineU = function(x){ return uF2.price + w2.slopeU * (x - uF2.bar); };
+          var lineL = function(x){ return dF2.price + w2.slopeL * (x - dF2.bar); };
+          var dnStrict = w2.dns.every(function(p, i){ return i === 0 || w2.dns[i - 1].price < p.price; });
+          var upStrict = w2.ups.every(function(p, i){ return i === 0 || w2.ups[i - 1].price < p.price; });
+          if (w2.gapE > 0 && w2.gapE < w2.gapStart && dnStrict && !upStrict &&
+              w2.slopeL > 0 && Math.abs(w2.slopeU) <= 0.25 * w2.slopeL)
+            gmScanLines(C, w2.lastBar + 2, w2.lastBar + 150, lineU, lineL, push);
+        })(w, uF, dF);
+      }
+    } else if (ptype === "triple_top"){
+      for (k = 0; k + 4 < seq.length; k++){
+        var s2 = seq.slice(k, k + 5);
+        var at2 = atr[s2[4].bar];
+        if (at2 === null || at2 === undefined) continue;
+        if (s2.map(function(p){ return p.type; }).join("") !== "HLHLH") continue;
+        var p0 = s2[0], p1 = s2[1], p2 = s2[2], p3 = s2[3], p4 = s2[4];
+        var peaks = [p0.price, p2.price, p4.price];
+        if (Math.max.apply(null, peaks) - Math.min.apply(null, peaks) > 0.25 * at2) continue;
+        if (Math.min(p0.price, p2.price) - p1.price < 1.0 * at2) continue;
+        if (Math.min(p2.price, p4.price) - p3.price < 1.0 * at2) continue;
+        var neck = Math.min(p1.price, p3.price), peak = Math.max.apply(null, peaks), c;
+        for (c = p4.bar + 2; c < Math.min(n, p4.bar + 150); c++){
+          if (C[c] > peak) break;
+          if (C[c] < neck){ push(c, "short"); break; }
+        }
+      }
+    } else if (ptype === "diamond"){
+      for (k = 0; k + 5 < seq.length; k++){
+        var s3 = seq.slice(k, k + 6);
+        var ups = s3.filter(function(p){ return p.type === "H"; });
+        var dns = s3.filter(function(p){ return p.type === "L"; });
+        if (ups.length !== 3 || dns.length !== 3) continue;
+        var H1 = ups[0], H2 = ups[1], H3 = ups[2], L1 = dns[0], L2 = dns[1], L3 = dns[2];
+        var lastBar = s3[5].bar, at3 = atr[lastBar];
+        if (at3 === null || at3 === undefined) continue;
+        if (H2.price > H1.price && L2.price < L1.price && H3.price < H2.price &&
+            L3.price > L2.price && H2.price - L2.price >= 1.0 * at3){
+          var sU = (H3.price - H2.price) / (H3.bar - H2.bar);
+          var sL = (L3.price - L2.price) / (L3.bar - L2.bar);
+          (function(H2b, L2b, sUb, sLb, lb){
+            var lineU = function(x){ return H2b.price + sUb * (x - H2b.bar); };
+            var lineL = function(x){ return L2b.price + sLb * (x - L2b.bar); };
+            gmScanLines(C, lb + 2, lb + 150, lineU, lineL, push);
+          })(H2, L2, sU, sL, lastBar);
+        }
+      }
+    }
+    raw.sort(function(a, b){ return a.bar - b.bar; });
+    return raw;
+  }
+  function gmDoubleTops(C, atr, seq){
+    var n = C.length, found = {}, k, c;
+    for (k = 0; k + 2 < seq.length; k++){
+      var a = seq[k], t = seq[k + 1], b = seq[k + 2];
+      if (!(a.type === "H" && t.type === "L" && b.type === "H")) continue;
+      var at = atr[b.bar];
+      if (at === null || at === undefined) continue;
+      if (Math.abs(a.price - b.price) <= 0.25 * at &&
+          Math.min(a.price, b.price) - t.price >= 1.0 * at){
+        var neck = t.price, peak = Math.max(a.price, b.price);
+        for (c = b.bar + 2; c < Math.min(n, b.bar + 150); c++){
+          if (C[c] > peak) break;
+          if (C[c] < neck){ found[c] = { bar: c, long: false }; break; }
+        }
+      }
+    }
+    return Object.keys(found).map(function(x){ return found[x]; })
+      .sort(function(x, y){ return x.bar - y.bar; });
+  }
+  function gmRisingWedges(C, seq){
+    var n = C.length, found = {}, k, c;
+    for (k = 0; k + 4 < seq.length; k++){
+      var s = seq.slice(k, k + 5);
+      var ups = s.filter(function(p){ return p.type === "H"; });
+      var dns = s.filter(function(p){ return p.type === "L"; });
+      var uF = ups[0], uL = ups[ups.length - 1], dF = dns[0], dL = dns[dns.length - 1];
+      var slopeU = (uL.price - uF.price) / (uL.bar - uF.bar);
+      var slopeL = (dL.price - dF.price) / (dL.bar - dF.bar);
+      var gapStart = uF.price - dF.price, gapE = uL.price - dL.price;
+      var upStrict = ups.every(function(p, i){ return i === 0 || p.price > ups[i - 1].price; });
+      var dnStrict = dns.every(function(p, i){ return i === 0 || p.price > dns[i - 1].price; });
+      if (!(upStrict && dnStrict && slopeU > 0 && slopeL > slopeU && gapE < gapStart && gapE > 0)) continue;
+      var lastBar = s[4].bar;
+      (function(uF2, dF2, su, sl, lb){
+        var lineU = function(x){ return uF2.price + su * (x - uF2.bar); };
+        var lineL = function(x){ return dF2.price + sl * (x - dF2.bar); };
+        for (var cc = lb + 2; cc < Math.min(n, lb + 150); cc++){
+          if (C[cc] > lineU(cc)) break;
+          if (C[cc] < lineL(cc)){ found[cc] = { bar: cc, long: false }; break; }
+        }
+      })(uF, dF, slopeU, slopeL, lastBar);
+    }
+    return Object.keys(found).map(function(x){ return found[x]; })
+      .sort(function(x, y){ return x.bar - y.bar; });
+  }
+
+  // ---- web machinery (ports of scalping-watch/web_shadow.py) ----
+  function gmWebCtx(O, H, L, C){
+    var n = C.length, t, j;
+    var MP = [], TP3 = [];
+    for (t = 0; t < n; t++){ MP.push((H[t] + L[t]) / 2); TP3.push((H[t] + L[t] + C[t]) / 3); }
+    var atr20 = gmAtrP(H, L, C, 20);
+    var sma20 = gmSmaNull(C, 20), sd20 = gmStdevPop(C, 20);
+    var z = [];
+    for (t = 0; t < n; t++)
+      z.push(sma20[t] === null || sd20[t] === null || sd20[t] === 0 ? null : (C[t] - sma20[t]) / sd20[t]);
+    var phase = gmHilbertPhase(C), sine = [], lead = [];
+    for (t = 0; t < n; t++){
+      if (t >= 12){
+        sine.push(Math.sin((phase[t] + 45) * Math.PI / 180));
+        lead.push(Math.sin((phase[t] + 90) * Math.PI / 180));
+      } else { sine.push(null); lead.push(null); }
+    }
+    var squeeze = [];
+    for (t = 0; t < n; t++){
+      if (sma20[t] === null || sd20[t] === null || atr20[t] === null){ squeeze.push(null); continue; }
+      squeeze.push(sma20[t] + 2 * sd20[t] < sma20[t] + 1.5 * atr20[t] &&
+                   sma20[t] - 2 * sd20[t] > sma20[t] - 1.5 * atr20[t]);
+    }
+    var bp = [], tru = [];
+    for (t = 0; t < n; t++){ bp.push(null); tru.push(null); }
+    for (t = 1; t < n; t++){
+      var lo = Math.min(L[t], C[t - 1]), hi = Math.max(H[t], C[t - 1]);
+      bp[t] = C[t] - lo;
+      tru[t] = hi - lo;
+    }
+    function uoAvg(p){
+      var out = [], tt;
+      for (tt = 0; tt < n; tt++){
+        if (tt < p){ out.push(null); continue; }
+        var sb = 0, st = 0, ok = true;
+        for (j = tt - p + 1; j <= tt; j++){
+          if (bp[j] === null){ ok = false; break; }
+          sb += bp[j]; st += tru[j];
+        }
+        out.push(!ok ? null : (st === 0 ? null : sb / st));
+      }
+      return out;
+    }
+    var a7 = uoAvg(7), a14 = uoAvg(14), a28 = uoAvg(28), uo = [];
+    for (t = 0; t < n; t++)
+      uo.push(a7[t] !== null && a14[t] !== null && a28[t] !== null ?
+              100 * (4 * a7[t] + 2 * a14[t] + a28[t]) / 7 : null);
+    var hl = gmRollHHLL(MP, 10), hh10 = hl[0], ll10 = hl[1];
+    var fish = [], v = 0, f = 0;
+    for (t = 0; t < n; t++){
+      if (hh10[t] === null){ fish.push(null); continue; }
+      var ratio = hh10[t] === ll10[t] ? 0.5 : (MP[t] - ll10[t]) / (hh10[t] - ll10[t]);
+      v = 0.33 * 2 * (ratio - 0.5) + 0.67 * v;
+      v = Math.max(-0.999, Math.min(0.999, v));
+      f = 0.5 * Math.log((1 + v) / (1 - v)) + 0.5 * f;
+      fish.push(f);
+    }
+    var w = 0.707 * 360 / 48 * Math.PI / 180;
+    var a1 = (Math.cos(w) + Math.sin(w) - 1) / Math.cos(w);
+    var hp = [];
+    for (t = 0; t < n; t++){
+      var p0 = C[t], p1 = t > 0 ? C[t - 1] : 0, p2 = t > 1 ? C[t - 2] : 0;
+      hp.push(Math.pow(1 - a1 / 2, 2) * (p0 - 2 * p1 + p2) +
+              2 * (1 - a1) * (t > 0 ? hp[t - 1] : 0) -
+              Math.pow(1 - a1, 2) * (t > 1 ? hp[t - 2] : 0));
+    }
+    var roof = gmSuperSmoother(hp, 10);
+    var esa = gmEmaWeb(TP3, 10), dev = [], dd2 = [];
+    for (t = 0; t < n; t++){ dev.push(esa[t] === null ? null : Math.abs(TP3[t] - esa[t])); }
+    var dE = gmEmaWeb(dev, 10), ci = [];
+    for (t = 0; t < n; t++){
+      if (esa[t] === null || dE[t] === null){ ci.push(null); continue; }
+      ci.push(dE[t] === 0 ? 0 : (TP3[t] - esa[t]) / (0.015 * dE[t]));
+    }
+    var wt1 = gmEmaWeb(ci, 21), wt2 = gmSmaNull(wt1, 4);
+    var u5 = [], d5 = [];
+    for (t = 0; t < n; t++){
+      u5.push(t < 5 ? null : Math.max(C[t] - C[t - 5], 0));
+      d5.push(t < 5 ? null : Math.max(C[t - 5] - C[t], 0));
+    }
+    var su = gmSmaNull(u5, 14), sdd = gmSmaNull(d5, 14), rmi = [];
+    for (t = 0; t < n; t++){
+      if (su[t] === null || sdd[t] === null){ rmi.push(null); continue; }
+      rmi.push(su[t] + sdd[t] === 0 ? 50 : 100 * su[t] / (su[t] + sdd[t]));
+    }
+    var rsi2 = gmRsiWeb(C, 2), sma200 = gmSmaNull(C, 200);
+    var r3 = gmRsiWeb(C, 3), streak = [], rs = [];
+    for (t = 0; t < n; t++){
+      if (t === 0) streak.push(0);
+      else if (C[t] > C[t - 1]) streak.push(streak[t - 1] > 0 ? streak[t - 1] + 1 : 1);
+      else if (C[t] < C[t - 1]) streak.push(streak[t - 1] < 0 ? streak[t - 1] - 1 : -1);
+      else streak.push(0);
+      rs.push(0);
+    }
+    for (t = 0; t < n; t++) rs[t] = streak[t] * 1.0;
+    var rStreak = gmRsiWeb(rs, 2), ret1 = [], crsi = [];
+    for (t = 0; t < n; t++){ ret1.push(t === 0 ? null : C[t] / C[t - 1] - 1); crsi.push(null); }
+    for (t = 100; t < n; t++){
+      if (r3[t] === null || rStreak[t] === null || ret1[t] === null) continue;
+      var cnt = 0;
+      for (j = t - 99; j <= t; j++) if (ret1[j] !== null && ret1[j] < ret1[t]) cnt++;
+      crsi[t] = (r3[t] + rStreak[t] + cnt) / 3;
+    }
+    return { z: z, sine: sine, lead: lead, squeeze: squeeze, uo: uo,
+             fish: fish, roof: roof, wt1: wt1, wt2: wt2, rmi: rmi,
+             crsi: crsi, rsi2: rsi2, sma200: sma200 };
+  }
+  function gmWebEvents(wc, C){
+    var ev = { W_FISHER: [], W_ZREV: [], W_RMI: [], W_ROOF: [], W_WT: [],
+               W_CRSI: [], W_RSI2: [] };
+    var n = C.length, t;
+    var F = wc.fish, trig = [null], zeros = [];
+    for (t = 0; t < n; t++){ zeros.push(0); if (t > 0) trig.push(F[t - 1]); }
+    function condL(tt){
+      return wc.sma200[tt] !== null && wc.rsi2[tt] !== null &&
+             C[tt] > wc.sma200[tt] && wc.rsi2[tt] < 5;
+    }
+    function condS(tt){
+      return wc.sma200[tt] !== null && wc.rsi2[tt] !== null &&
+             C[tt] < wc.sma200[tt] && wc.rsi2[tt] > 95;
+    }
+    for (t = 1; t < n; t++){
+      if (gmCrossUp(F, trig, t)) ev.W_FISHER.push({ bar: t, long: true });
+      else if (gmCrossDn(F, trig, t)) ev.W_FISHER.push({ bar: t, long: false });
+      var a = wc.z[t], b = wc.z[t - 1];
+      if (a !== null && b !== null){
+        if (b <= -2 && a > -2) ev.W_ZREV.push({ bar: t, long: true });
+        else if (b >= 2 && a < 2) ev.W_ZREV.push({ bar: t, long: false });
+      }
+      a = wc.rmi[t]; b = wc.rmi[t - 1];
+      if (a !== null && b !== null){
+        if (b >= 80 && a < 80) ev.W_RMI.push({ bar: t, long: false });
+        else if (b <= 20 && a > 20) ev.W_RMI.push({ bar: t, long: true });
+      }
+      if (gmCrossUp(wc.roof, zeros, t)) ev.W_ROOF.push({ bar: t, long: true });
+      else if (gmCrossDn(wc.roof, zeros, t)) ev.W_ROOF.push({ bar: t, long: false });
+      if (gmCrossUp(wc.wt1, wc.wt2, t)) ev.W_WT.push({ bar: t, long: true });
+      else if (gmCrossDn(wc.wt1, wc.wt2, t)) ev.W_WT.push({ bar: t, long: false });
+      a = wc.crsi[t]; b = wc.crsi[t - 1];
+      if (a !== null && b !== null && wc.sma200[t] !== null){
+        if (b >= 10 && a < 10 && C[t] > wc.sma200[t]) ev.W_CRSI.push({ bar: t, long: true });
+        else if (b <= 90 && a > 90 && C[t] < wc.sma200[t]) ev.W_CRSI.push({ bar: t, long: false });
+      }
+      if (condL(t) && !condL(t - 1)) ev.W_RSI2.push({ bar: t, long: true });
+      else if (condS(t) && !condS(t - 1)) ev.W_RSI2.push({ bar: t, long: false });
+    }
+    return ev;
+  }
+
+  // ---- grand-merge context: every series the 20 vetoes and the 25
+  // engines need, computed once per (pair, candle set) ----
+  var GM_ENGINE_ORDER = ["E1_AC", "E2_PSAR", "E3_CCIREV", "E4_MOM",
+    "E5_FIB618", "E6_GANN", "E7_TWEEZ_M5", "E7_HANGMAN_M5",
+    "E7_HARAMI_M5", "E7_BELT_M5", "E7_TWEEZ_M15", "E7_HARAMI_M15",
+    "E7_ENGULF_M15", "E8_ASCTRI_M5", "E8_TRITOP_M5", "E8_DIAMOND_M15",
+    "P_WEDGE_M5", "P_DTOP_M15", "W_FISHER", "W_ZREV", "W_RMI",
+    "W_ROOF", "W_WT", "W_CRSI", "W_RSI2"];
+  function gmBuildCtx(c5, c15, ts5, ts15){
+    function arrs(cs){
+      var O = [], H = [], L = [], C = [], i;
+      for (i = 0; i < cs.length; i++){
+        O.push(cs[i].open); H.push(cs[i].high);
+        L.push(cs[i].low); C.push(cs[i].close);
+      }
+      return { O: O, H: H, L: L, C: C };
+    }
+    var a5 = arrs(c5), a15 = arrs(c15);
+    var ctx = { n5: c5.length, n15: c15.length, ts5: ts5, ts15: ts15,
+                O5: a5.O, H5: a5.H, L5: a5.L, C5: a5.C,
+                O15: a15.O, H15: a15.H, L15: a15.L, C15: a15.C };
+    ctx.atr5 = gmAtrP(ctx.H5, ctx.L5, ctx.C5, 14);
+    ctx.atr15 = gmAtrP(ctx.H15, ctx.L15, ctx.C15, 14);
+    var n = ctx.n5, i, j, k;
+    // --- schools precomputation (mirrors c3Vetoes' internals) ---
+    ctx.rsiS = c3RsiSeries(ctx.C5, 14);
+    ctx.ema50 = c3EmaArr(ctx.C5, 50);
+    ctx.st22 = c3SupertrendDir(ctx.H5, ctx.L5, ctx.C5, 2.2);
+    ctx.oscE = c3AroonOscEma25(ctx.H5, ctx.L5);
+    var pv5 = gmPivotBars(ctx.H5, ctx.L5);
+    var delta = [], cvd = [], run = 0;
+    for (j = 0; j < n; j++){
+      delta.push(ctx.H5[j] > ctx.L5[j] ?
+        (2 * ctx.C5[j] - ctx.H5[j] - ctx.L5[j]) / (ctx.H5[j] - ctx.L5[j]) : 0);
+      run += delta[j];
+      if (j - 21 >= 0) run -= delta[j - 21];
+      cvd.push(run);
+    }
+    ctx.f2b = []; ctx.f2s = []; ctx.hb = []; ctx.hs = [];
+    for (j = 0; j < n; j++){ ctx.f2b.push(false); ctx.f2s.push(false); ctx.hb.push(false); ctx.hs.push(false); }
+    function mark(arr, c0){
+      var lim = Math.min(n - 1, c0 + 10), x;
+      for (x = c0; x <= lim; x++) arr[x] = true;
+    }
+    var pH = pv5[0], pL = pv5[1];
+    for (k = 1; k < pH.length; k++){
+      var pvA = pH[k - 1], cuA = pH[k], c0 = cuA + 2;
+      if (c0 >= n) continue;
+      if (ctx.rsiS[pvA] !== null && ctx.rsiS[cuA] !== null &&
+          ctx.H5[cuA] < ctx.H5[pvA] && ctx.rsiS[cuA] > ctx.rsiS[pvA]) mark(ctx.f2b, c0);
+      if (ctx.H5[cuA] > ctx.H5[pvA] && cvd[cuA] < cvd[pvA] &&
+          ctx.ema50[cuA] !== null && ctx.C5[cuA] < ctx.ema50[cuA]) mark(ctx.hb, c0);
+    }
+    for (k = 1; k < pL.length; k++){
+      var pvB = pL[k - 1], cuB = pL[k], c02 = cuB + 2;
+      if (c02 >= n) continue;
+      if (ctx.rsiS[pvB] !== null && ctx.rsiS[cuB] !== null &&
+          ctx.L5[cuB] > ctx.L5[pvB] && ctx.rsiS[cuB] < ctx.rsiS[pvB]) mark(ctx.f2s, c02);
+      if (ctx.L5[cuB] < ctx.L5[pvB] && cvd[cuB] > cvd[pvB] &&
+          ctx.ema50[cuB] !== null && ctx.C5[cuB] > ctx.ema50[cuB]) mark(ctx.hs, c02);
+    }
+    ctx.tabH = c3RangeTables(ctx.H5, true);
+    ctx.tabL = c3RangeTables(ctx.L5, false);
+    // liquidity-wall pools, built once (mirrors robust_shadow's
+    // _build_pools: swing(4) confirmations + wick pools, in bar order)
+    ctx.wallPools = [];
+    var confAt = {};
+    for (j = 4; j < n - 4; j++){
+      var isH = true, isL = true, xx;
+      for (xx = j - 4; xx <= j + 4; xx++){
+        if (xx === j) continue;
+        if (ctx.H5[xx] >= ctx.H5[j]) isH = false;
+        if (ctx.L5[xx] <= ctx.L5[j]) isL = false;
+      }
+      if (isH || isL) confAt[j + 4] = [j, isH, isL];
+    }
+    for (j = 0; j < n; j++){
+      var cf = confAt[j];
+      if (cf && ctx.atr5[cf[0]] !== null){
+        var sj = cf[0], sa = ctx.atr5[sj];
+        if (cf[1]) ctx.wallPools.push([true, ctx.H5[sj], ctx.H5[sj] + 0.75 * sa, 1.6, j, ctx.H5[sj]]);
+        if (cf[2]) ctx.wallPools.push([false, ctx.L5[sj] - 0.75 * sa, ctx.L5[sj], 1.6, j, ctx.L5[sj]]);
+      }
+      if (ctx.atr5[j] !== null){
+        var mx = Math.max(ctx.O5[j], ctx.C5[j]), mn = Math.min(ctx.O5[j], ctx.C5[j]);
+        if (ctx.H5[j] - mx >= 0.45 * ctx.atr5[j]) ctx.wallPools.push([true, mx, ctx.H5[j], 0.5, j, mx]);
+        if (mn - ctx.L5[j] >= 0.45 * ctx.atr5[j]) ctx.wallPools.push([false, ctx.L5[j], mn, 0.5, j, mn]);
+      }
+    }
+    var INFLIM = n + 1e9;
+    ctx.fvgBull = []; ctx.fvgBear = [];
+    for (j = 2; j < n; j++){
+      if (ctx.L5[j] > ctx.H5[j - 2]){
+        var db = c3FirstBreach(ctx.tabL, n, j + 1, ctx.H5[j - 2], true);
+        ctx.fvgBull.push([j, ctx.L5[j], ctx.H5[j - 2], db === null ? INFLIM : db]);
+      }
+      if (ctx.H5[j] < ctx.L5[j - 2]){
+        var ds = c3FirstBreach(ctx.tabH, n, j + 1, ctx.L5[j - 2], false);
+        ctx.fvgBear.push([j, ctx.H5[j], ctx.L5[j - 2], ds === null ? INFLIM : ds]);
+      }
+    }
+    // CPR levels per source day, from the M15 day aggregation
+    var days = {}, dorder = [];
+    for (i = 0; i < ctx.n15; i++){
+      var dk = Math.floor(ts15[i] / 86400), d0 = days[dk];
+      if (!d0){ days[dk] = { h: ctx.H15[i], l: ctx.L15[i], c: ctx.C15[i] }; dorder.push(dk); }
+      else {
+        if (ctx.H15[i] > d0.h) d0.h = ctx.H15[i];
+        if (ctx.L15[i] < d0.l) d0.l = ctx.L15[i];
+        d0.c = ctx.C15[i];
+      }
+    }
+    dorder.sort(function(x, y){ return x - y; });
+    ctx.cprDays = dorder;
+    ctx.cprLvl = {};
+    dorder.forEach(function(dkk){
+      var a = days[dkk];
+      var P = (a.h + a.l + a.c) / 3, TC = (a.h + a.l) / 2;
+      ctx.cprLvl[dkk] = { R1: 2 * P - a.l, R2: P + (a.h - a.l),
+                          S1: 2 * P - a.h, S2: P - (a.h - a.l),
+                          TC: TC, BC: 2 * P - TC };
+    });
+    // Heikin Ashi wick block flags per M15 index
+    ctx.haBlockL = []; ctx.haBlockS = [];
+    var prevO = null, prevC = null;
+    for (i = 0; i < ctx.n15; i++){
+      var haC = (ctx.O15[i] + ctx.H15[i] + ctx.L15[i] + ctx.C15[i]) / 4;
+      var haO = i === 0 ? ctx.O15[i] : (prevO + prevC) / 2;
+      var haH = Math.max(ctx.H15[i], haO, haC);
+      var haL = Math.min(ctx.L15[i], haO, haC);
+      var hbody = Math.abs(haC - haO);
+      ctx.haBlockL.push((Math.min(haO, haC) - haL) > hbody);
+      ctx.haBlockS.push((haH - Math.max(haO, haC)) > hbody);
+      prevO = haO; prevC = haC;
+    }
+    // --- batch precomputation ---
+    ctx.cci5 = gmCci(ctx.H5, ctx.L5, ctx.C5, 20);
+    ctx.sma21 = gmSmaNull(ctx.C5, 21);
+    ctx.psarDir = gmPsarDir(ctx.H5, ctx.L5, ctx.C5);
+    ctx.dayFib = gmDayFib(ts5, ctx.H5, ctx.L5, ctx.C5);
+    ctx.seq5 = gmAltSeq(ctx.H5, ctx.L5);
+    ctx.swings5 = gmMajorSwings(ctx.seq5, ctx.atr5);
+    ctx.seq15 = gmAltSeq(ctx.H15, ctx.L15);
+    ctx.forkAt15 = gmBuildForkAt(ctx.H15, ctx.L15);
+    ctx.candles15 = gmDetectCandles(ctx.O15, ctx.H15, ctx.L15, ctx.C15, ctx.atr15);
+    ctx.candles5 = gmDetectCandles(ctx.O5, ctx.H5, ctx.L5, ctx.C5, ctx.atr5);
+    var pv15 = gmPivotBars(ctx.H15, ctx.L15);
+    ctx.pivH15 = {}; ctx.pivL15 = {};
+    pv15[0].forEach(function(x){ ctx.pivH15[x] = 1; });
+    pv15[1].forEach(function(x){ ctx.pivL15[x] = 1; });
+    ctx.pivH5 = {}; ctx.pivL5 = {};
+    pH.forEach(function(x){ ctx.pivH5[x] = 1; });
+    pL.forEach(function(x){ ctx.pivL5[x] = 1; });
+    // --- web precomputation ---
+    ctx.web = gmWebCtx(ctx.O5, ctx.H5, ctx.L5, ctx.C5);
+    // --- engine event streams ---
+    ctx.eventsBySrc = {};
+    function reg(src, evs, tf){
+      ctx.eventsBySrc[src] = evs.map(function(e){
+        return { bar: e.bar, long: e.long, tf: tf };
+      });
+    }
+    var b1 = gmBatch1Events(ctx.psarDir, ctx.cci5,
+             gmMomentum(ctx.C5, 14), gmAcSeries(ctx.H5, ctx.L5));
+    reg("E1_AC", b1.E1_AC, "5"); reg("E2_PSAR", b1.E2_PSAR, "5");
+    reg("E3_CCIREV", b1.E3_CCIREV, "5"); reg("E4_MOM", b1.E4_MOM, "5");
+    ctx.swings15 = gmMajorSwings(ctx.seq15, ctx.atr15);
+    reg("E5_FIB618", gmFib618Events({ H: ctx.H15, L: ctx.L15, C: ctx.C15 }, ctx.swings15), "15");
+    reg("E6_GANN", gmGannEvents(ctx.C15, ctx.atr15, ctx.seq15), "15");
+    reg("E7_TWEEZ_M5", gmCandleEvents(ctx.H5, ctx.L5, ctx.atr5, ctx.candles5, ctx.pivH5, ctx.pivL5, "tweezers_top"), "5");
+    reg("E7_HANGMAN_M5", gmCandleEvents(ctx.H5, ctx.L5, ctx.atr5, ctx.candles5, ctx.pivH5, ctx.pivL5, "hanging_man"), "5");
+    reg("E7_HARAMI_M5", gmCandleEvents(ctx.H5, ctx.L5, ctx.atr5, ctx.candles5, ctx.pivH5, ctx.pivL5, "harami_bear"), "5");
+    reg("E7_BELT_M5", gmCandleEvents(ctx.H5, ctx.L5, ctx.atr5, ctx.candles5, ctx.pivH5, ctx.pivL5, "belt_hold_bear"), "5");
+    reg("E7_TWEEZ_M15", gmCandleEvents(ctx.H15, ctx.L15, ctx.atr15, ctx.candles15, ctx.pivH15, ctx.pivL15, "tweezers_top"), "15");
+    reg("E7_HARAMI_M15", gmCandleEvents(ctx.H15, ctx.L15, ctx.atr15, ctx.candles15, ctx.pivH15, ctx.pivL15, "harami_bear"), "15");
+    reg("E7_ENGULF_M15", gmCandleEvents(ctx.H15, ctx.L15, ctx.atr15, ctx.candles15, ctx.pivH15, ctx.pivL15, "engulfing_bear"), "15");
+    reg("E8_ASCTRI_M5", gmB4Events(ctx.C5, ctx.atr5, ctx.seq5, "asc_triangle"), "5");
+    reg("E8_TRITOP_M5", gmB4Events(ctx.C5, ctx.atr5, ctx.seq5, "triple_top"), "5");
+    reg("E8_DIAMOND_M15", gmB4Events(ctx.C15, ctx.atr15, ctx.seq15, "diamond"), "15");
+    reg("P_WEDGE_M5", gmRisingWedges(ctx.C5, ctx.seq5), "5");
+    reg("P_DTOP_M15", gmDoubleTops(ctx.C15, ctx.atr15, ctx.seq15), "15");
+    var we = gmWebEvents(ctx.web, ctx.C5);
+    GM_ENGINE_ORDER.forEach(function(src){
+      if (we[src]) reg(src, we[src], "5");
+    });
+    // event lookup maps: ev5[i5] and ev15ByI5[i5]
+    ctx.ev5 = {}; ctx.ev15ByI5 = {};
+    var ts5Index = {};
+    for (i = 0; i < ctx.n5; i++) ts5Index[ts5[i]] = i;
+    GM_ENGINE_ORDER.forEach(function(src){
+      (ctx.eventsBySrc[src] || []).forEach(function(e){
+        if (e.tf === "5"){
+          if (!ctx.ev5[e.bar]) ctx.ev5[e.bar] = [];
+          ctx.ev5[e.bar].push({ src: src, long: e.long });
+        } else {
+          var mapped = ts5Index[ts15[e.bar] + 600];
+          if (mapped !== undefined){
+            if (!ctx.ev15ByI5[mapped]) ctx.ev15ByI5[mapped] = [];
+            ctx.ev15ByI5[mapped].push({ src: src, long: e.long, j15: e.bar });
+          }
+        }
+      });
+    });
+    return ctx;
+  }
+  function gmCprFor(ctx, sigDay){
+    var prev = null, i;
+    for (i = 0; i < ctx.cprDays.length; i++){
+      if (ctx.cprDays[i] < sigDay) prev = ctx.cprDays[i]; else break;
+    }
+    return prev === null ? null : ctx.cprLvl[prev];
+  }
+  // The V (liquidity wall) verdict from the context's prebuilt pools
+  // — the same maths as c3WallBlocked / robust_shadow.wall_blocked,
+  // without rebuilding the pools per call.
+  function gmWallAt(ctx, idx, isLong, entry, atr){
+    var H = ctx.H5, L = ctx.L5, pools = ctx.wallPools, j;
+    var loI = Math.max(0, idx - 299), rLo = Infinity, rHi = -Infinity;
+    for (j = loI; j <= idx; j++){
+      if (L[j] < rLo) rLo = L[j];
+      if (H[j] > rHi) rHi = H[j];
+    }
+    if (!(rHi > rLo)) return false;
+    var NB = 40, w = (rHi - rLo) / NB, rowsW = [], pi;
+    for (j = 0; j < NB; j++) rowsW.push(0);
+    for (pi = 0; pi < pools.length; pi++){
+      var p = pools[pi];
+      if (p[4] > idx) break;
+      if (!(p[2] > p[1])) continue;
+      var pen = 0;
+      if (idx > p[4]){
+        var track = p[0] ? Math.max(p[5], c3RangeQuery(ctx.tabH, p[4] + 1, idx, true))
+                         : Math.min(p[5], c3RangeQuery(ctx.tabL, p[4] + 1, idx, false));
+        pen = p[0] ? (track - p[1]) / (p[2] - p[1]) : (p[2] - track) / (p[2] - p[1]);
+        pen = Math.min(1, Math.max(0, pen));
+      }
+      if (pen >= 1) continue;
+      var eff = p[3] * Math.pow(0.5, (idx - p[4]) / 300) * (1 - pen);
+      if (!(eff > 0)) continue;
+      var i0 = Math.max(0, Math.min(NB - 1, Math.trunc((p[1] - rLo) / w)));
+      var i1 = Math.max(0, Math.min(NB - 1, Math.trunc((p[2] - rLo) / w)));
+      for (var r2 = i0; r2 <= i1; r2++) rowsW[r2] += eff;
+    }
+    var wall = null;
+    for (var r3 = 0; r3 < NB; r3++){
+      var c = rLo + (r3 + 0.5) * w;
+      if (isLong){
+        if (c > entry + 0.3 * atr && (wall === null || rowsW[r3] > wall[1])) wall = [c, rowsW[r3]];
+      } else {
+        if (c < entry - 0.3 * atr && (wall === null || rowsW[r3] > wall[1])) wall = [c, rowsW[r3]];
+      }
+    }
+    return !!(wall && wall[1] > 0 && Math.abs(wall[0] - entry) / atr < 1.0);
+  }
+  function gmSchoolsAt(ctx, i5, isLong, entry, atr){
+    var blocks = [];
+    if (i5 < 0 || i5 >= ctx.n5 || !(atr > 0)) return blocks;
+    var ref = gmLastClosed(ctx.ts15, 900, ctx.ts5[i5] + 300);
+    if (ref >= 0 && (isLong ? ctx.haBlockL[ref] : ctx.haBlockS[ref])) blocks.push("HA");
+    if (isLong ? ctx.f2b[i5] : ctx.f2s[i5]) blocks.push("F2");
+    var sd = ctx.st22[i5];
+    if (sd !== null && ((isLong && sd < 0) || (!isLong && sd > 0))) blocks.push("K");
+    var lv = gmCprFor(ctx, Math.floor(ctx.ts5[i5] / 86400));
+    if (lv){
+      if (isLong){
+        var res = [lv.R1, lv.R2, lv.TC].filter(function(x){ return x > entry; });
+        if (res.length && Math.min.apply(null, res) - entry < 1.0 * atr) blocks.push("I");
+      } else {
+        var sup = [lv.S1, lv.S2, lv.BC].filter(function(x){ return x < entry; });
+        if (sup.length && entry - Math.max.apply(null, sup) < 1.0 * atr) blocks.push("I");
+      }
+    }
+    var zones = isLong ? ctx.fvgBear : ctx.fvgBull, zi;
+    for (zi = 0; zi < zones.length; zi++){
+      var z = zones[zi];
+      if (z[0] <= i5 && i5 < z[3] &&
+          ((isLong && z[1] > entry && z[1] - entry < atr) ||
+           (!isLong && z[1] < entry && entry - z[1] < atr))){
+        blocks.push("P1");
+        break;
+      }
+    }
+    if (isLong ? ctx.hb[i5] : ctx.hs[i5]) blocks.push("H");
+    if (gmWallAt(ctx, i5, isLong, entry, atr)) blocks.push("V");
+    var oe = ctx.oscE[i5];
+    if (oe !== null && ((isLong && oe <= 0) || (!isLong && oe >= 0))) blocks.push("G2");
+    if (c3HvnBlocked(ctx.H5, ctx.L5, i5, isLong, entry, atr)) blocks.push("T");
+    return blocks;
+  }
+  function gmBatchVetoesAt(ctx, i5, isLong, entry, atr){
+    var blocks = [];
+    if (i5 < 0 || i5 >= ctx.n5) return blocks;
+    var x = ctx.cci5[i5];
+    if (x !== null && x !== undefined && (isLong ? x > 100 : x < -100)) blocks.push("V1");
+    var a = ctx.atr5[i5], sma = ctx.sma21[i5];
+    if (a !== null && sma !== null && sma !== undefined){
+      var c = ctx.C5[i5];
+      if (isLong ? c >= sma + 2 * a : c <= sma - 2 * a) blocks.push("V2");
+    }
+    var d = ctx.psarDir[i5];
+    if (d !== null && d !== undefined && (isLong ? d < 0 : d > 0)) blocks.push("V3");
+    var lv = ctx.dayFib[Math.floor(ctx.ts5[i5] / 86400)];
+    if (lv){
+      if (isLong){
+        var above = lv[0].filter(function(v){ return v > entry; });
+        if (above.length && Math.min.apply(null, above) - entry < 1.0 * atr) blocks.push("V4");
+      } else {
+        var below = lv[1].filter(function(v){ return v < entry; });
+        if (below.length && entry - Math.max.apply(null, below) < 1.0 * atr) blocks.push("V4");
+      }
+    }
+    var sw = gmSwingAt(ctx.swings5, i5);
+    if (sw){
+      var target = entry + (isLong ? 3.75 * atr : -3.75 * atr), rr;
+      var lo = Math.min(entry, target), hi = Math.max(entry, target), hit = false;
+      [0.272, 0.618].forEach(function(r){
+        var lvv = sw.up ? sw.bPrice + r * sw.range : sw.bPrice - r * sw.range;
+        if (lvv > lo && lvv < hi) hit = true;
+      });
+      if (hit) blocks.push("V5");
+    }
+    var ref = gmLastClosed(ctx.ts15, 900, ctx.ts5[i5] + 300);
+    if (ref >= 1){
+      var want = isLong ? "short" : "long", rb, ei, evs;
+      var v6 = false;
+      for (rb = ref; rb >= ref - 1 && !v6; rb--){
+        evs = ctx.candles15[rb] || [];
+        for (ei = 0; ei < evs.length; ei++) if (evs[ei][1] === want){ v6 = true; break; }
+      }
+      if (v6) blocks.push("V6");
+      var fk = ctx.forkAt15[ref], a15 = ctx.atr15[ref];
+      if (fk && a15 !== null && a15 !== undefined){
+        var lines = [fk.med(ref), fk.up(ref), fk.lo(ref)], room;
+        if (isLong){
+          var ab = lines.filter(function(v){ return v > entry; });
+          room = ab.length ? Math.min.apply(null, ab) - entry : Infinity;
+        } else {
+          var bl = lines.filter(function(v){ return v < entry; });
+          room = bl.length ? entry - Math.max.apply(null, bl) : Infinity;
+        }
+        if (room < 1.0 * a15) blocks.push("V7");
+      }
+    }
+    return blocks;
+  }
+  function gmWebVetoesAt(ctx, i5, isLong){
+    var blocks = [], w = ctx.web;
+    if (i5 < 0 || i5 >= ctx.n5) return blocks;
+    var v = w.z[i5];
+    if (v !== null && v !== undefined && ((isLong && v >= 2) || (!isLong && v <= -2))) blocks.push("VZ");
+    var sa = w.sine[i5], sb = w.lead[i5];
+    if (sa !== null && sa !== undefined && sb !== null && sb !== undefined &&
+        ((isLong && sa < sb) || (!isLong && sa > sb))) blocks.push("VSINE");
+    if (w.squeeze[i5] === true) blocks.push("VTTM");
+    v = w.uo[i5];
+    if (v !== null && v !== undefined && ((isLong && v > 70) || (!isLong && v < 30))) blocks.push("VUO");
+    return blocks;
+  }
+  // The merged guard verdict for one candidate: {count, blocks} over
+  // all 20 vetoes. Blocked (S3) iff count >= 3. Fails open per family.
+  function gmCountAt(ctx, i5, isLong, entry, atr){
+    var blocks = [];
+    try { blocks = blocks.concat(gmSchoolsAt(ctx, i5, isLong, entry, atr)); } catch (e) {}
+    try { blocks = blocks.concat(gmBatchVetoesAt(ctx, i5, isLong, entry, atr)); } catch (e) {}
+    try { blocks = blocks.concat(gmWebVetoesAt(ctx, i5, isLong)); } catch (e) {}
+    return { count: blocks.length, blocks: blocks };
+  }
+  // Engine candidates whose event bar maps to M5 index i5 (M5-native
+  // events at i5 plus M15-native events whose close maps to i5), in
+  // declared engine order, each with its native entry/ATR.
+  function gmEventsAt(ctx, i5){
+    var out = [], bySrc5 = {}, bySrc15 = {}, i;
+    var l5 = ctx.ev5[i5] || [], l15 = ctx.ev15ByI5[i5] || [];
+    for (i = 0; i < l5.length; i++){
+      if (!bySrc5[l5[i].src]) bySrc5[l5[i].src] = [];
+      bySrc5[l5[i].src].push(l5[i]);
+    }
+    for (i = 0; i < l15.length; i++){
+      if (!bySrc15[l15[i].src]) bySrc15[l15[i].src] = [];
+      bySrc15[l15[i].src].push(l15[i]);
+    }
+    GM_ENGINE_ORDER.forEach(function(src){
+      (bySrc5[src] || []).forEach(function(e){
+        out.push({ src: src, long: e.long, tf: "5",
+                   entry: ctx.C5[i5], atr: ctx.atr5[i5] });
+      });
+      (bySrc15[src] || []).forEach(function(e){
+        out.push({ src: src, long: e.long, tf: "15", j15: e.j15,
+                   entry: ctx.C15[e.j15], atr: ctx.atr15[e.j15] });
+      });
+    });
+    return out;
+  }
+
   window.ScalpStrategy = { settings: settings, defaults: clone(DEFAULTS),
     presets: PRESETS, checkSignal: checkSignal,
     ema: emaSeries, rsi: rsiLast, atr: atrLast,
-    macd: macdLast, stoch: stochLast, boll: bollLast };
+    macd: macdLast, stoch: stochLast, gmBuildCtx: gmBuildCtx, gmCountAt: gmCountAt,
+    gmEventsAt: gmEventsAt, newsBlockedFor: newsBlockedFor, gmNewsEvents: NEWS_EVENTS, boll: bollLast };
 
   /* ===== Notifications ===== */
   function inQuietHours(){
@@ -2323,6 +3853,20 @@
     h = ((h % 24) + 24) % 24;
     return h >= 20;
   }
+  // v47: the APK feed carries no timestamps for M5/M15 candles, but
+  // the merged guard (CPR/Fibonacci days, M15 mapping) and the news
+  // gate need candle start times. Yahoo bars sit on the interval grid
+  // and robotScan judges only closed candles (it drops the
+  // still-forming last row), so start times are derived by stepping
+  // back from the last closed candle's grid slot. (The watchdog passes
+  // the feed's exact timestamps through the same shapes.)
+  function synthCandleTs(arr, step){
+    var out = [];
+    if (!arr || !arr.length) return out;
+    var lastStart = Math.floor(Date.now() / 1000 / step) * step - step;
+    for (var j = 0; j < arr.length; j++) out.push(lastStart - (arr.length - 1 - j) * step);
+    return out;
+  }
   function robotScan(manual){
     robotStoreCurrent();
     robotReportWatch();
@@ -2347,24 +3891,28 @@
       // 15-minute vote bias does not oppose it. Without 5-minute data the
       // robot falls back to the 15-minute-only path.
       if (candles5.length >= need){
-        var sig5 = window.ScalpStrategy.checkSignal(k, candles5);
+        var ts5s = synthCandleTs(candles5, 300), ts15s = synthCandleTs(candles, 900);
+        var gmCtx = null;
+        try { gmCtx = window.ScalpStrategy.gmBuildCtx(candles5, candles, ts5s, ts15s); } catch (e) {}
+        var sig5 = window.ScalpStrategy.checkSignal(k, candles5, gmCtx ? { gmCtx: gmCtx } : null);
         var use5 = !!(sig5.long || sig5.short);
         if (use5 && candles.length >= need){
           var sigT = window.ScalpStrategy.checkSignal(k, candles);
           if ((sig5.long && sigT.votes < 0) || (sig5.short && sigT.votes > 0)) use5 = false;
           else sig5.reason += " · اتجاه ربع ساعة مؤيّد";
         }
-        if (use5){ results.push({ key:k, s:s, ok:true, count:candles5.length, sig:sig5, score:sig5.score, candles:candles5, tf:"5" }); return; }
-        if (candles.length < need){ results.push({ key:k, s:s, ok:true, count:candles5.length, sig:sig5, score:sig5.score, candles:candles5, tf:"5" }); return; }
+        if (use5){ results.push({ key:k, s:s, ok:true, count:candles5.length, sig:sig5, score:sig5.score, candles:candles5, candles15:candles, tf:"5", gmCtx:gmCtx, closeTs:(ts5s.length ? ts5s[ts5s.length - 1] + 300 : 0) }); return; }
+        if (candles.length < need){ results.push({ key:k, s:s, ok:true, count:candles5.length, sig:sig5, score:sig5.score, candles:candles5, candles15:candles, tf:"5", gmCtx:gmCtx, closeTs:(ts5s.length ? ts5s[ts5s.length - 1] + 300 : 0) }); return; }
       }
       if (candles.length < need){ results.push({ key:k, s:s, ok:false, count:candles.length, score:0 }); return; }
       var sig = window.ScalpStrategy.checkSignal(k, candles);
-      results.push({ key:k, s:s, ok:true, count:candles.length, sig:sig, score:sig.score, candles:candles, tf:"15" });
+      var ts15only = synthCandleTs(candles, 900);
+      results.push({ key:k, s:s, ok:true, count:candles.length, sig:sig, score:sig.score, candles:candles, tf:"15", closeTs:(ts15only.length ? ts15only[ts15only.length - 1] + 900 : 0) });
     });
     robotLastResults = results;
     robotResolveOpen();
     renderWatchState(results, minScore);
-    h1bAdvance(gateBlocked()); // v42: hourly retest module (state always advances; fills fire only when not gate-blocked)
+    h1bAdvance(function(k2, fillTs){ return gateBlocked() || (window.ScalpStrategy.newsBlockedFor ? window.ScalpStrategy.newsBlockedFor(k2, fillTs) : false); }); // v42 + v47 news gate: fills fire only when neither CLAUDE_GATE nor the news gate blocks this pair at the fill instant
     if (gateBlocked()){
       if (robotOn) gateShowBlocked();
       if (manual) toast("الروبوت متوقف مؤقتاً — قرار Muse");
@@ -2373,6 +3921,34 @@
     var opps = results.filter(function(r){ return r.ok && (r.sig.long || r.sig.short) && r.score >= minScore && gatePasses(r.sig); })
       .sort(function(a, b){ return b.score - a.score; });
     if (robotNightOff()) opps = []; // v40: no firing 20:00-24:00 Baghdad
+    // v47 news gate (silent, like CLAUDE_GATE): no baseline signal
+    // fires inside a high-impact event window for its currencies.
+    if (window.ScalpStrategy.newsBlockedFor)
+      opps = opps.filter(function(r){ return !window.ScalpStrategy.newsBlockedFor(r.key, r.closeTs || 0); });
+    // v47 grand merge: standalone-engine candidates at the last
+    // closed candle, judged by the same S3 guard layer + news gate,
+    // appended after the baseline opportunities (the shared fire
+    // loop below applies the per-pair lock, dedupe and format).
+    if (!robotNightOff()){
+      results.forEach(function(r){
+        if (!r.gmCtx) return;
+        var evs = [];
+        try { evs = window.ScalpStrategy.gmEventsAt(r.gmCtx, r.gmCtx.n5 - 1); } catch (e) { return; }
+        evs.forEach(function(ev){
+          if (!(ev.atr > 0)) return;
+          var cnt = 0;
+          try { cnt = window.ScalpStrategy.gmCountAt(r.gmCtx, r.gmCtx.n5 - 1, ev.long, ev.entry, r.gmCtx.atr5[r.gmCtx.n5 - 1]).count; } catch (e) { return; }
+          if (cnt >= 3) return;
+          var closeTs = r.gmCtx.ts5[r.gmCtx.n5 - 1] + 300;
+          if (window.ScalpStrategy.newsBlockedFor && window.ScalpStrategy.newsBlockedFor(r.key, closeTs)) return;
+          var series = ev.tf === "15" ? r.candles15 : r.candles;
+          if (!series || !series.length) return;
+          opps.push({ key: r.key, s: r.s, ok: true, count: series.length,
+            sig: { long: ev.long, short: !ev.long, score: 0, votes: 0, atr: ev.atr, reason: "" },
+            score: 0, candles: series, tf: ev.tf, eng: ev.src, closeTs: closeTs });
+        });
+      });
+    }
     var firedNow = 0;
     // v20: no user-set daily trade cap — issuance is governed only by Muse's
     // internal quality gate and protections (stored maxDaily stays dormant).
@@ -2588,7 +4164,8 @@
           var touch = st.dir > 0 ? (cd.low <= mid) : (cd.high >= mid);
           if (touch){
             st.phase = "done";
-            if (!blocked && !robotOpen[k] && cd.ts === latestClosedTs) h1bFire(k, s, st);
+            var blkNow = (typeof blocked === "function") ? blocked(k, cd.ts + 3600) : blocked;
+            if (!blkNow && !robotOpen[k] && cd.ts === latestClosedTs) h1bFire(k, s, st);
           }
         }
       });
@@ -2613,9 +4190,9 @@
   // change in v44 (the earlier prepared v43 revert was declined by Ali
   // and was never shipped; geometry stays SL 2.5 / TP 3.75).
   try {
-    if ((+localStorage.getItem("scalping-log-epoch") || 1) < 3) {
+    if ((+localStorage.getItem("scalping-log-epoch") || 1) < 5) {
       localStorage.removeItem("scalping-robot-log-v1");
-      localStorage.setItem("scalping-log-epoch", "3");
+      localStorage.setItem("scalping-log-epoch", "5");
     }
   } catch (e) {}
   robotLogRestore();
