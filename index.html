@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-11-v46" />
+<meta name="app-version" content="2026-11-11-v44" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -640,7 +640,7 @@
   // flood continued (AUD/JPY sells, 10:01-10:03). Reload only when the
   // served version number is strictly newer, so cache flip-flops in the
   // check fetch cannot cause a reload loop.
-  var PAGE_VERSION = "2026-11-11-v46";
+  var PAGE_VERSION = "2026-11-11-v44";
   window.ScalpPageVersion = PAGE_VERSION;
   function scalpVerNum(v){ var mm = /-v(\d+)$/.exec(v || ""); return mm ? parseInt(mm[1], 10) : -1; }
   function scalpCheckFresh(){
@@ -933,397 +933,7 @@
     return { mid: mid, up: up, dn: dn, pos: pos };
   }
 
-  // v46 (2026-11-11): C3 GUARD LAYER — the eight schools vetoes (F2 hidden
-  // RSI divergence, K Supertrend(10, 2.2), I CPR room, P1 FVG room,
-  // H CVD divergence, V simulated liquidity wall, G2 EMA25-smoothed
-  // Aroon(29), T HVN shelf) plus the Heikin Ashi wick veto (V3_M15),
-  // applied as ONE silent guard at the M5 fire point. Combo study C3
-  // (backtest/combo_summary.md): kept 57 of 1,762 baseline signals,
-  // 57.89% target, +63.75 ATR, +1.1184/trade in-sample. The schools
-  // logic below is a line-faithful port of scalping-watch/
-  // robust_shadow.py (itself verified trade-exact against the schools
-  // study), and haWickVeto is the HA study's verified port. The guard
-  // runs ONLY when the caller supplies the guard bundle — the robot's
-  // M5 trigger call does; the M15 vote/fallback calls do not, so they
-  // keep the exact pre-v46 behaviour. H1B is untouched. Every veto
-  // fails OPEN on missing/insufficient data: no data, no block.
-  // guard = { m15: [...], ts: [...], ts15: [...] }: ts / ts15 are the
-  // candle START times (unix seconds) parallel to `candles` / guard.m15.
-  // Only the CPR veto needs them — previous-UTC-day pivot levels,
-  // aggregated from the M15 series (a day's OHLC is the same on any
-  // timeframe; the phone's M15 buffer covers ~2.6 days, its M5 buffer
-  // less than one).
-  function haWickVeto(long, candles){
-    if (!candles || !candles.length) return false;
-    var prevO = null, prevC = null, o = 0, h = 0, l = 0, c = 0;
-    for (var i = 0; i < candles.length; i++){
-      var cd = candles[i];
-      var haC = (cd.open + cd.high + cd.low + cd.close) / 4;
-      var haO = (i === 0) ? cd.open : (prevO + prevC) / 2;
-      var haH = Math.max(cd.high, haO, haC);
-      var haL = Math.min(cd.low, haO, haC);
-      o = haO; h = haH; l = haL; c = haC;
-      prevO = haO; prevC = haC;
-    }
-    var body = Math.abs(c - o);
-    if (long) return (Math.min(o, c) - l) > body;
-    return (h - Math.max(o, c)) > body;
-  }
-
-  function c3RsiSeries(closes, p){
-    var n = closes.length, out = [], i, d, g = 0, l = 0;
-    for (i = 0; i < n; i++) out.push(null);
-    if (n <= p) return out;
-    for (i = 1; i <= p; i++){ d = closes[i] - closes[i - 1]; if (d > 0) g += d; else l -= d; }
-    g /= p; l /= p;
-    out[p] = (l === 0) ? 100 : 100 - 100 / (1 + g / l);
-    for (i = p + 1; i < n; i++){
-      d = closes[i] - closes[i - 1];
-      g = (g * (p - 1) + (d > 0 ? d : 0)) / p;
-      l = (l * (p - 1) + (d < 0 ? -d : 0)) / p;
-      out[i] = (l === 0) ? 100 : 100 - 100 / (1 + g / l);
-    }
-    return out;
-  }
-
-  function c3EmaArr(vals, p){
-    var out = [], i, s = 0;
-    for (i = 0; i < vals.length; i++) out.push(null);
-    if (vals.length < p) return out;
-    for (i = 0; i < p; i++) s += vals[i];
-    out[p - 1] = s / p;
-    var k = 2 / (p + 1);
-    for (i = p; i < vals.length; i++) out[i] = vals[i] * k + out[i - 1] * (1 - k);
-    return out;
-  }
-
-  function c3WilderArr(vals, p){
-    var out = [], i, s = 0;
-    for (i = 0; i < vals.length; i++) out.push(null);
-    if (vals.length < p) return out;
-    for (i = 0; i < p; i++) s += vals[i];
-    out[p - 1] = s / p;
-    for (i = p; i < vals.length; i++) out[i] = out[i - 1] + (vals[i] - out[i - 1]) / p;
-    return out;
-  }
-
-  function c3SupertrendDir(H, L, C, mult){
-    var n = C.length, i;
-    var TR = [];
-    for (i = 0; i < n; i++) TR.push(0);
-    for (i = 1; i < n; i++) TR[i] = Math.max(H[i] - L[i], Math.abs(H[i] - C[i - 1]), Math.abs(L[i] - C[i - 1]));
-    var atr = c3WilderArr(TR, 10);
-    var ST = [];
-    for (i = 0; i < n; i++) ST.push(null);
-    var fUp = null, fDn = null, dir = 1;
-    for (i = 0; i < n; i++){
-      if (atr[i] === null) continue;
-      var src = (H[i] + L[i] + C[i]) / 3;
-      var bUp = src + mult * atr[i], bDn = src - mult * atr[i];
-      if (fUp === null){ fUp = bUp; fDn = bDn; dir = (C[i] >= src) ? 1 : -1; }
-      else {
-        fUp = (bUp < fUp || C[i - 1] > fUp) ? bUp : fUp;
-        fDn = (bDn > fDn || C[i - 1] < fDn) ? bDn : fDn;
-        if (dir === 1 && C[i] < fDn) dir = -1;
-        else if (dir === -1 && C[i] > fUp) dir = 1;
-      }
-      ST[i] = dir;
-    }
-    return ST;
-  }
-
-  function c3AroonOscEma25(H, L){
-    var n = H.length, t, j;
-    var osc = [];
-    for (t = 0; t < n; t++) osc.push(null);
-    for (t = 28; t < n; t++){
-      var iH = t, iL = t;
-      for (j = t - 28; j <= t; j++){
-        if (H[j] >= H[iH]) iH = j;
-        if (L[j] <= L[iL]) iL = j;
-      }
-      osc[t] = 100 * (((28 - (t - iH)) - (28 - (t - iL))) / 28);
-    }
-    var oscE = [];
-    for (t = 0; t < n; t++) oscE.push(null);
-    var idxs = [];
-    for (t = 0; t < n; t++) if (osc[t] !== null) idxs.push(t);
-    if (idxs.length >= 25){
-      var e = 0;
-      for (j = 0; j < 25; j++) e += osc[idxs[j]];
-      e /= 25;
-      oscE[idxs[24]] = e;
-      var kk = 2 / 26;
-      for (j = 25; j < idxs.length; j++){ e = osc[idxs[j]] * kk + e * (1 - kk); oscE[idxs[j]] = e; }
-    }
-    return oscE;
-  }
-
-  function c3RangeTables(vals, wantMax){
-    var n = vals.length;
-    if (!n) return [];
-    var tables = [vals.slice()], step = 1;
-    while (step * 2 <= n){
-      var prev = tables[tables.length - 1], size = n - step * 2 + 1, cur = [], i;
-      for (i = 0; i < size; i++){
-        var a = prev[i], b = prev[i + step];
-        cur.push(((a >= b) === wantMax) ? a : b);
-      }
-      tables.push(cur);
-      step *= 2;
-    }
-    return tables;
-  }
-
-  function c3RangeQuery(tables, lo, hi, wantMax){
-    var len = hi - lo + 1, k = 0;
-    while ((1 << (k + 1)) <= len) k++;
-    var span = 1 << k;
-    var a = tables[k][lo], b = tables[k][hi - span + 1];
-    return ((a >= b) === wantMax) ? a : b;
-  }
-
-  function c3FirstBreach(tables, n, start, threshold, wantBelow){
-    if (start >= n) return null;
-    var whole = c3RangeQuery(tables, start, n - 1, !wantBelow);
-    if (wantBelow){ if (whole >= threshold) return null; }
-    else if (whole <= threshold) return null;
-    var lo = start, hi = n - 1;
-    while (lo < hi){
-      var mid = (lo + hi) >> 1;
-      var v = c3RangeQuery(tables, start, mid, !wantBelow);
-      var breached = wantBelow ? (v < threshold) : (v > threshold);
-      if (breached) hi = mid; else lo = mid + 1;
-    }
-    return lo;
-  }
-
-  function c3CprLevels(guard){
-    if (!guard || !guard.m15 || !guard.ts15 || !guard.ts || !guard.ts.length) return null;
-    if (guard.ts15.length !== guard.m15.length) return null;
-    var days = {}, order = [], i, dk;
-    for (i = 0; i < guard.m15.length; i++){
-      var r = guard.m15[i];
-      dk = Math.floor(guard.ts15[i] / 86400);
-      var d0 = days[dk];
-      if (!d0){ days[dk] = { h: r.high, l: r.low, c: r.close }; order.push(dk); }
-      else {
-        if (r.high > d0.h) d0.h = r.high;
-        if (r.low < d0.l) d0.l = r.low;
-        d0.c = r.close;
-      }
-    }
-    var sigDay = Math.floor(guard.ts[guard.ts.length - 1] / 86400), prev = null;
-    for (i = 0; i < order.length; i++){
-      if (order[i] < sigDay) prev = order[i]; else break;
-    }
-    if (prev === null) return null;
-    var a = days[prev];
-    var P = (a.h + a.l + a.c) / 3, TC = (a.h + a.l) / 2;
-    return { R1: 2 * P - a.l, R2: P + (a.h - a.l), S1: 2 * P - a.h,
-             S2: P - (a.h - a.l), TC: TC, BC: 2 * P - TC };
-  }
-
-  function c3WallBlocked(O, H, L, C, tabH, tabL, idx, isLong, entry, atr){
-    var n = C.length, j, b, x;
-    var TR = [];
-    for (j = 0; j < n; j++) TR.push(0);
-    for (j = 1; j < n; j++) TR[j] = Math.max(H[j] - L[j], Math.abs(H[j] - C[j - 1]), Math.abs(L[j] - C[j - 1]));
-    var atr14 = [];
-    for (j = 0; j < n; j++) atr14.push(null);
-    if (n > 14){
-      var a = 0;
-      for (j = 1; j < 15; j++) a += TR[j];
-      a /= 14;
-      atr14[14] = a;
-      for (j = 15; j < n; j++){ a = (a * 13 + TR[j]) / 14; atr14[j] = a; }
-    }
-    var confAt = {};
-    for (j = 4; j < n - 4; j++){
-      var isH = true, isL = true;
-      for (x = j - 4; x <= j + 4; x++){
-        if (x === j) continue;
-        if (H[x] >= H[j]) isH = false;
-        if (L[x] <= L[j]) isL = false;
-      }
-      if (isH || isL) confAt[j + 4] = [j, isH, isL];
-    }
-    var pools = [];
-    for (b = 0; b < n; b++){
-      var cf = confAt[b];
-      if (cf && atr14[cf[0]] !== null){
-        var sj = cf[0], sa = atr14[sj];
-        if (cf[1]) pools.push([true, H[sj], H[sj] + 0.75 * sa, 1.6, b, H[sj]]);
-        if (cf[2]) pools.push([false, L[sj] - 0.75 * sa, L[sj], 1.6, b, L[sj]]);
-      }
-      if (atr14[b] !== null){
-        var mx = Math.max(O[b], C[b]), mn = Math.min(O[b], C[b]);
-        if (H[b] - mx >= 0.45 * atr14[b]) pools.push([true, mx, H[b], 0.5, b, mx]);
-        if (mn - L[b] >= 0.45 * atr14[b]) pools.push([false, L[b], mn, 0.5, b, mn]);
-      }
-    }
-    var loI = Math.max(0, idx - 299), rLo = Infinity, rHi = -Infinity;
-    for (j = loI; j <= idx; j++){
-      if (L[j] < rLo) rLo = L[j];
-      if (H[j] > rHi) rHi = H[j];
-    }
-    if (!(rHi > rLo)) return false;
-    var NB = 40, w = (rHi - rLo) / NB, rowsW = [], pi, r2;
-    for (j = 0; j < NB; j++) rowsW.push(0);
-    for (pi = 0; pi < pools.length; pi++){
-      var p = pools[pi];
-      if (p[4] > idx) break;
-      if (!(p[2] > p[1])) continue;
-      var pen = 0;
-      if (idx > p[4]){
-        var track = p[0] ? Math.max(p[5], c3RangeQuery(tabH, p[4] + 1, idx, true))
-                         : Math.min(p[5], c3RangeQuery(tabL, p[4] + 1, idx, false));
-        pen = p[0] ? (track - p[1]) / (p[2] - p[1]) : (p[2] - track) / (p[2] - p[1]);
-        pen = Math.min(1, Math.max(0, pen));
-      }
-      if (pen >= 1) continue;
-      var eff = p[3] * Math.pow(0.5, (idx - p[4]) / 300) * (1 - pen);
-      if (!(eff > 0)) continue;
-      var i0 = Math.max(0, Math.min(NB - 1, Math.trunc((p[1] - rLo) / w)));
-      var i1 = Math.max(0, Math.min(NB - 1, Math.trunc((p[2] - rLo) / w)));
-      for (r2 = i0; r2 <= i1; r2++) rowsW[r2] += eff;
-    }
-    var wall = null;
-    for (var r3 = 0; r3 < NB; r3++){
-      var c = rLo + (r3 + 0.5) * w;
-      if (isLong){
-        if (c > entry + 0.3 * atr && (wall === null || rowsW[r3] > wall[1])) wall = [c, rowsW[r3]];
-      } else {
-        if (c < entry - 0.3 * atr && (wall === null || rowsW[r3] > wall[1])) wall = [c, rowsW[r3]];
-      }
-    }
-    return !!(wall && wall[1] > 0 && Math.abs(wall[0] - entry) / atr < 1.0);
-  }
-
-  function c3HvnBlocked(H, L, idx, isLong, entry, atr){
-    var frm = Math.max(0, idx - 287), lo = Infinity, hi = -Infinity, j, b;
-    for (j = frm; j <= idx; j++){
-      if (L[j] < lo) lo = L[j];
-      if (H[j] > hi) hi = H[j];
-    }
-    if (!(hi > lo)) return false;
-    var NB = 30, w = (hi - lo) / NB, bins = [];
-    for (j = 0; j < NB; j++) bins.push(0);
-    for (j = frm; j <= idx; j++){
-      var b0 = Math.min(NB - 1, Math.trunc((L[j] - lo) / w));
-      var b1 = Math.min(NB - 1, Math.trunc((H[j] - lo) / w));
-      for (b = b0; b <= b1; b++) bins[b] += 1;
-    }
-    var poc = 0;
-    for (b = 1; b < NB; b++) if (bins[b] > bins[poc]) poc = b;
-    var thr = 0.05 * bins[poc];
-    var nearAbove = Infinity, nearBelow = -Infinity;
-    for (b = 1; b < NB - 1; b++){
-      if (b === poc) continue;
-      if (bins[b] > bins[b - 1] && bins[b] > bins[b + 1] && bins[b] >= thr){
-        var price = lo + (b + 0.5) * w;
-        if (price > entry && price < nearAbove) nearAbove = price;
-        if (price < entry && price > nearBelow) nearBelow = price;
-      }
-    }
-    return isLong ? (nearAbove - entry < 1.0 * atr) : (entry - nearBelow < 1.0 * atr);
-  }
-
-  // Returns the list of C3 veto codes blocking this direction at the
-  // last candle of `candles` ([] = the signal passes the guard layer).
-  function c3Vetoes(candles, guard, isLong, entry, atr){
-    var blocks = [];
-    try {
-      var n = candles.length, i, j, k;
-      if (!n || !(atr > 0)) return blocks;
-      var O = [], H = [], L = [], C = [];
-      for (i = 0; i < n; i++){
-        O.push(candles[i].open); H.push(candles[i].high);
-        L.push(candles[i].low); C.push(candles[i].close);
-      }
-      var idx = n - 1;
-      if (guard.m15 && guard.m15.length && haWickVeto(isLong, guard.m15)) blocks.push("HA");
-      var rsi = c3RsiSeries(C, 14);
-      var ema50 = c3EmaArr(C, 50);
-      var st22 = c3SupertrendDir(H, L, C, 2.2);
-      var oscE = c3AroonOscEma25(H, L);
-      var pH = [], pL = [];
-      for (j = 2; j < n - 2; j++){
-        if (H[j] > H[j - 1] && H[j] > H[j - 2] && H[j] > H[j + 1] && H[j] > H[j + 2]) pH.push(j);
-        if (L[j] < L[j - 1] && L[j] < L[j - 2] && L[j] < L[j + 1] && L[j] < L[j + 2]) pL.push(j);
-      }
-      var delta = [], cvd = [], run = 0;
-      for (j = 0; j < n; j++){
-        delta.push((H[j] > L[j]) ? (2 * C[j] - H[j] - L[j]) / (H[j] - L[j]) : 0);
-        run += delta[j];
-        if (j - 21 >= 0) run -= delta[j - 21];
-        cvd.push(run);
-      }
-      var F2buy = [], F2sell = [], Hbuy = [], Hsell = [];
-      for (j = 0; j < n; j++){ F2buy.push(false); F2sell.push(false); Hbuy.push(false); Hsell.push(false); }
-      function mark(arr, c0){
-        var lim = Math.min(n - 1, c0 + 10), x;
-        for (x = c0; x <= lim; x++) arr[x] = true;
-      }
-      for (k = 1; k < pH.length; k++){
-        var pv = pH[k - 1], cu = pH[k], c0 = cu + 2;
-        if (c0 >= n) continue;
-        if (rsi[pv] !== null && rsi[cu] !== null && H[cu] < H[pv] && rsi[cu] > rsi[pv]) mark(F2buy, c0);
-        if (H[cu] > H[pv] && cvd[cu] < cvd[pv] && ema50[cu] !== null && C[cu] < ema50[cu]) mark(Hbuy, c0);
-      }
-      for (k = 1; k < pL.length; k++){
-        var pv2 = pL[k - 1], cu2 = pL[k], c02 = cu2 + 2;
-        if (c02 >= n) continue;
-        if (rsi[pv2] !== null && rsi[cu2] !== null && L[cu2] > L[pv2] && rsi[cu2] < rsi[pv2]) mark(F2sell, c02);
-        if (L[cu2] < L[pv2] && cvd[cu2] > cvd[pv2] && ema50[cu2] !== null && C[cu2] > ema50[cu2]) mark(Hsell, c02);
-      }
-      if (isLong ? F2buy[idx] : F2sell[idx]) blocks.push("F2");
-      var sd = st22[idx];
-      if (sd !== null && ((isLong && sd < 0) || (!isLong && sd > 0))) blocks.push("K");
-      var lv = c3CprLevels(guard);
-      if (lv){
-        if (isLong){
-          var res = [lv.R1, lv.R2, lv.TC].filter(function(x){ return x > entry; });
-          if (res.length && Math.min.apply(null, res) - entry < 1.0 * atr) blocks.push("I");
-        } else {
-          var sup = [lv.S1, lv.S2, lv.BC].filter(function(x){ return x < entry; });
-          if (sup.length && entry - Math.max.apply(null, sup) < 1.0 * atr) blocks.push("I");
-        }
-      }
-      var tabH = c3RangeTables(H, true), tabL = c3RangeTables(L, false);
-      var INFLIM = n + 1e9, fvgBull = [], fvgBear = [];
-      for (j = 2; j < n; j++){
-        if (L[j] > H[j - 2]){
-          var db = c3FirstBreach(tabL, n, j + 1, H[j - 2], true);
-          fvgBull.push([j, L[j], H[j - 2], (db === null) ? INFLIM : db]);
-        }
-        if (H[j] < L[j - 2]){
-          var ds = c3FirstBreach(tabH, n, j + 1, L[j - 2], false);
-          fvgBear.push([j, H[j], L[j - 2], (ds === null) ? INFLIM : ds]);
-        }
-      }
-      var zones = isLong ? fvgBear : fvgBull, zi;
-      for (zi = 0; zi < zones.length; zi++){
-        var z = zones[zi];
-        if (z[0] <= idx && idx < z[3] &&
-            ((isLong && z[1] > entry && z[1] - entry < atr) ||
-             (!isLong && z[1] < entry && entry - z[1] < atr))){
-          blocks.push("P1");
-          break;
-        }
-      }
-      if (isLong ? Hbuy[idx] : Hsell[idx]) blocks.push("H");
-      if (c3WallBlocked(O, H, L, C, tabH, tabL, idx, isLong, entry, atr)) blocks.push("V");
-      var oe = oscE[idx];
-      if (oe !== null && ((isLong && oe <= 0) || (!isLong && oe >= 0))) blocks.push("G2");
-      if (c3HvnBlocked(H, L, idx, isLong, entry, atr)) blocks.push("T");
-    } catch (e) {
-      return [];
-    }
-    return blocks;
-  }
-
-  function checkSignal(symbol, candles, guard){
+  function checkSignal(symbol, candles){
     var st = settings.strategy;
     var none = { long:false, short:false, score:0, votes:0, maxVotes:0, rsi:null, atr:null, reason:"بيانات شموع غير كافية" };
     var needMin = Math.max(st.useEma ? st.emaSlow : 0, st.useRsi ? st.rsiPeriod : 0, st.atrPeriod,
@@ -1401,15 +1011,6 @@
     if ((votes >= maxVotes * 0.55 && blockLong) || (votes <= -maxVotes * 0.55 && blockShort))
       reasons.push("الإشارة محجوبة بفلتر التشبّع/الاتجاه");
     if (!volOk) reasons.push("تقلّب ATR غير مناسب");
-    // v46: C3 guard layer (see the c3* block above). Applies only when
-    // the caller supplies the guard bundle — the robot's M5 trigger
-    // call does; the M15 vote/fallback calls do not, so they are
-    // unchanged. Silent: no reason text, no UI trace — a vetoed
-    // direction simply does not fire.
-    if (guard && (long || short)){
-      if (long && c3Vetoes(candles, guard, true, closes[i1], atr).length) long = false;
-      else if (short && c3Vetoes(candles, guard, false, closes[i1], atr).length) short = false;
-    }
     return { long:long, short:short, score:Math.min(100, score), votes:votes, maxVotes:maxVotes, rsi:rsi, atr:atr,
              reason: reasons.join(" · "),
              meetsThreshold: score >= settings.notifications.minConfidence };
@@ -2722,19 +2323,6 @@
     h = ((h % 24) + 24) % 24;
     return h >= 20;
   }
-  // v46: the APK feed carries no timestamps for M5/M15 candles, but the
-  // C3 guard's CPR veto needs candle start times. Yahoo bars sit on the
-  // interval grid and robotScan judges only closed candles (it drops
-  // the still-forming last row), so start times are derived by stepping
-  // back from the last closed candle's grid slot. (The watchdog passes
-  // the feed's exact timestamps through the same bundle shape.)
-  function synthCandleTs(arr, step){
-    var out = [];
-    if (!arr || !arr.length) return out;
-    var lastStart = Math.floor(Date.now() / 1000 / step) * step - step;
-    for (var j = 0; j < arr.length; j++) out.push(lastStart - (arr.length - 1 - j) * step);
-    return out;
-  }
   function robotScan(manual){
     robotStoreCurrent();
     robotReportWatch();
@@ -2759,8 +2347,7 @@
       // 15-minute vote bias does not oppose it. Without 5-minute data the
       // robot falls back to the 15-minute-only path.
       if (candles5.length >= need){
-        var sig5 = window.ScalpStrategy.checkSignal(k, candles5,
-          { m15: candles, ts: synthCandleTs(candles5, 300), ts15: synthCandleTs(candles, 900) });
+        var sig5 = window.ScalpStrategy.checkSignal(k, candles5);
         var use5 = !!(sig5.long || sig5.short);
         if (use5 && candles.length >= need){
           var sigT = window.ScalpStrategy.checkSignal(k, candles);
@@ -3025,15 +2612,10 @@
   // fresh start #3 — same one-time wipe, epoch bumped to 3. No strategy
   // change in v44 (the earlier prepared v43 revert was declined by Ali
   // and was never shipped; geometry stays SL 2.5 / TP 3.75).
-  // v46 (2026-11-11, Ali: «تدمجهن بالروبوت لو لا ونبلش جديد»): fresh
-  // start #4 — same one-time wipe, epoch bumped to 4. v46 is the merged
-  // build: the C3 guard layer (the eight schools vetoes + the HA wick
-  // veto, one silent layer at the M5 fire point) joins the robot.
-  // Geometry unchanged (SL 2.5 / TP 3.75); H1B untouched.
   try {
-    if ((+localStorage.getItem("scalping-log-epoch") || 1) < 4) {
+    if ((+localStorage.getItem("scalping-log-epoch") || 1) < 3) {
       localStorage.removeItem("scalping-robot-log-v1");
-      localStorage.setItem("scalping-log-epoch", "4");
+      localStorage.setItem("scalping-log-epoch", "3");
     }
   } catch (e) {}
   robotLogRestore();
