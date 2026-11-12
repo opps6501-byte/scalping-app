@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="color-scheme" content="light dark" />
 <meta name="theme-color" content="#060d14" />
-<meta name="app-version" content="2026-11-11-v47" />
+<meta name="app-version" content="2026-11-12-v48" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
 <link rel="apple-touch-icon" href="icon-192.png" />
 <meta name="mobile-web-app-capable" content="yes" />
@@ -640,7 +640,7 @@
   // flood continued (AUD/JPY sells, 10:01-10:03). Reload only when the
   // served version number is strictly newer, so cache flip-flops in the
   // check fetch cannot cause a reload loop.
-  var PAGE_VERSION = "2026-11-11-v47";
+  var PAGE_VERSION = "2026-11-12-v48";
   window.ScalpPageVersion = PAGE_VERSION;
   function scalpVerNum(v){ var mm = /-v(\d+)$/.exec(v || ""); return mm ? parseInt(mm[1], 10) : -1; }
   function scalpCheckFresh(){
@@ -1011,13 +1011,35 @@
     if ((votes >= maxVotes * 0.55 && blockLong) || (votes <= -maxVotes * 0.55 && blockShort))
       reasons.push("الإشارة محجوبة بفلتر التشبّع/الاتجاه");
     if (!volOk) reasons.push("تقلّب ATR غير مناسب");
-    // v47: grand-merge guard layer (S3) — only when the caller
-    // supplies the merged context (the robot's M5 trigger call does).
+    // v47: grand-merge guard layer — only when the caller supplies
+    // the merged context (the robot's M5 trigger call does).
+    // v48 (2026-11-12): QUALITY TIER — Ali's order: his account is
+    // $20 growing toward $100 and he can enter only one or two
+    // signals, so the robot fires ONLY its highest-confidence
+    // setups. Offline tier evaluation on the grand-merge
+    // calibration pool (backtest/grandmerge_candidates.json,
+    // 55,122 candidates / 83.34 days): a baseline signal passing
+    // ALL NINE core guards — the eight schools vetoes (F2, K, I,
+    // P1, H, V, G2, T) plus the Heikin Ashi wick veto (HA), the
+    // "C3" subset of the combination study — kept 57 trades,
+    // 57.89% target, +63.75 ATR, +1.1184/trade, halves
+    // +20.00/+43.75, ex-best +46.25, 0.68/day on 10 pairs
+    // (~1.1/day on Ali's 16 pairs), vs the v47 S3 rule (blocked
+    // iff >= 3 of all 20 vetoes): 42.59% target, +0.1611/trade.
+    // Pool-wide stricter tiers failed: blocks == 0 kept only 25
+    // (0.30/day, +0.25/trade); blocks <= 1 went NEGATIVE (-40.0
+    // ATR) on engine volume. So v48: a baseline signal fires only
+    // if ZERO of the nine core guards block it; the standalone
+    // engines no longer fire at all (see robotScan). The sample
+    // is thin (57) — the live record remains the judge.
     if (guard && guard.gmCtx && (long || short)){
       try {
         var gmAtr47 = atr != null ? atr : guard.gmCtx.atr5[guard.gmCtx.n5 - 1];
-        if (long && gmCountAt(guard.gmCtx, guard.gmCtx.n5 - 1, true, closes[i1], gmAtr47).count >= 3) long = false;
-        else if (short && gmCountAt(guard.gmCtx, guard.gmCtx.n5 - 1, false, closes[i1], gmAtr47).count >= 3) short = false;
+        var gmBlk48 = gmCountAt(guard.gmCtx, guard.gmCtx.n5 - 1, long, closes[i1], gmAtr47).blocks;
+        var gmCore48 = ["F2", "K", "I", "P1", "H", "V", "G2", "T", "HA"], gmBad48 = 0, gmBi48;
+        for (gmBi48 = 0; gmBi48 < gmBlk48.length; gmBi48++)
+          if (gmCore48.indexOf(gmBlk48[gmBi48]) >= 0) gmBad48++;
+        if (gmBad48 > 0){ long = false; short = false; }
       } catch (e) {}
     }
     return { long:long, short:short, score:Math.min(100, score), votes:votes, maxVotes:maxVotes, rsi:rsi, atr:atr,
@@ -3929,7 +3951,11 @@
     // closed candle, judged by the same S3 guard layer + news gate,
     // appended after the baseline opportunities (the shared fire
     // loop below applies the per-pair lock, dedupe and format).
-    if (!robotNightOff()){
+    // v48 (2026-11-12): DISABLED by the quality tier — the
+    // standalone engines no longer fire; only baseline signals
+    // passing all nine core guards reach the fire loop (see the
+    // v48 note in checkSignal). Block kept inert for reference.
+    if (false && !robotNightOff()){
       results.forEach(function(r){
         if (!r.gmCtx) return;
         var evs = [];
